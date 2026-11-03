@@ -12,15 +12,8 @@ struct LiveSettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("小鹅通直播 → 语音转写 / 图片 OCR → Bark")
                 .font(.subheadline.weight(.semibold))
-            Text("将访问令牌填入浏览器插件。插件每 30 秒发送新增主播消息；关闭窗口后服务继续运行。")
+            Text("插件直接连接本机服务，每 30 秒发送新增主播消息；关闭窗口后服务继续运行。")
                 .font(.caption).foregroundStyle(.secondary)
-            HStack {
-                SecureField("插件访问令牌", text: $config.token)
-                Button("复制") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(config.token, forType: .string)
-                }
-            }
             SecureField("Bark 完整地址：https://api.day.app/设备Key", text: $config.barkURL)
                 .textFieldStyle(.roundedBorder)
             HStack {

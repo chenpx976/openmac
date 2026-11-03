@@ -3,7 +3,6 @@ import Foundation
 import CryptoKit
 
 struct LiveConfiguration: Codable {
-    var token = UUID().uuidString + UUID().uuidString
     var barkURL = ""
 
     static let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -20,7 +19,6 @@ struct LiveConfiguration: Codable {
     }
 
     func save() throws {
-        guard token.count >= 24 else { throw APIRequestError.badRequest("访问令牌至少需要 24 个字符") }
         if !barkURL.isEmpty {
             guard let url = URL(string: barkURL), ["https", "http"].contains(url.scheme), url.host != nil else {
                 throw APIRequestError.badRequest("Bark 地址应为包含设备 Key 的完整 HTTP(S) 地址")
@@ -164,13 +162,6 @@ actor LivePipeline {
     func saveConfiguration(_ value: LiveConfiguration) throws {
         try value.save()
         config = value
-    }
-
-    func authorize(_ request: HTTPRequestMessage) throws {
-        if let startupError { throw APIRequestError.internalError(startupError) }
-        guard let config, request.headers["authorization"] == "Bearer \(config.token)" else {
-            throw APIRequestError.unauthorized("直播服务访问令牌不正确")
-        }
     }
 
     func ingest(_ batch: LiveBatch, files: [String: Data] = [:]) throws -> Int {

@@ -15,7 +15,7 @@ bash scripts/install-live.sh
 1. 启动应用，HTTP 端口设为 **8080**，打开服务开关。
 2. 在“直播消息”页填入 Bark 完整地址 `https://api.day.app/设备Key/`，保存。
 3. 点击“授权语音识别”，允许系统弹窗；同时开启系统设置 → 键盘 → 听写。Speech 仅使用本地识别，不自动切换云端。
-4. 把此页的访问令牌复制到小鹅通插件中，点击插件“开始监听”。
+4. 打开小鹅通直播间，直接点击插件“开始监听”，无需配置本地访问令牌。
 5. Config → **Launch at Login** 开启登录启动。系统可能要求在登录项设置中确认。HTTP 开关和端口会保存，登录后自动恢复；关闭窗口不会退出应用，菜单栏可显示设置或退出。
 
 这是登录后启动，不是在用户尚未登录时启动的系统守护进程。可用以下启动参数触发初次配置：
@@ -28,11 +28,7 @@ open "$HOME/Applications/OpenMac Live.app" --args --authorize-speech --enable-lo
 
 ## 传输协议
 
-HTTP 服务只监听 `127.0.0.1`。以下直播 API 均要求：
-
-```text
-Authorization: Bearer <直播消息页的访问令牌>
-```
+HTTP 服务只监听 `127.0.0.1`，直播 API 无需令牌或 Authorization 请求头。
 
 **POST `/api/live/messages`** 推荐使用 `multipart/form-data`，不要手动设置 boundary：
 
@@ -92,7 +88,7 @@ Authorization: Bearer <直播消息页的访问令牌>
 本地文件（未提交到仓库）：
 
 ```text
-~/Library/Application Support/OpenMacLive/config.json  # 访问令牌、Bark 地址
+~/Library/Application Support/OpenMacLive/config.json  # Bark 地址
 ~/Library/Application Support/OpenMacLive/queue.json   # 消息、结果、通知队列
 ~/Library/Application Support/OpenMacLive/media/       # 上传的原始媒体
 ```
@@ -106,4 +102,4 @@ bash scripts/test-live.sh
 xcodebuild -project openmac.xcodeproj -scheme openmac -configuration Debug CODE_SIGNING_ALLOWED=NO build
 ```
 
-验证覆盖持久化恢复、去重、推送确认及重试、通知分段、原图去重、鉴权、HTTP 长度校验、multipart 二进制保真、上传落盘以及原生中文 OCR。测试推送使用模拟传输，不访问实际 Bark，不需要填写设备密钥。
+验证覆盖持久化恢复、去重、推送确认及重试、通知分段、原图去重、HTTP 长度校验、multipart 二进制保真、上传落盘以及原生中文 OCR。测试推送使用模拟传输，不访问实际 Bark，不需要填写设备密钥。

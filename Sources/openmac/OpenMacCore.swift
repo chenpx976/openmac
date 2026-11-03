@@ -391,13 +391,13 @@ struct APIEndpoint: Identifiable, Equatable {
 
     static let all: [APIEndpoint] = [
         APIEndpoint(name: "直播消息入队", method: "POST", path: "/api/live/messages",
-                    summary: "持久化接收主播消息，自动语音转写、OCR 和 Bark 推送。需要 Bearer 令牌。",
+                    summary: "持久化接收主播消息，自动语音转写、OCR 和 Bark 推送，无需令牌。",
                     requestDemo: "{\"appId\":\"app_example\",\"aliveId\":\"l_example\",\"roomId\":\"XET#example\",\"title\":\"直播\",\"messages\":[]}",
-                    postParameters: "Authorization: Bearer <直播设置中的令牌>。推荐 multipart/form-data：metadata 为批次 JSON，media0 等字段为原始图片/MP3；metadata.media 列出 {url, field}。也接受 JSON 调试请求。messages 为小鹅通原始主播消息数组。",
+                    postParameters: "推荐 multipart/form-data：metadata 为批次 JSON，media0 等字段为原始图片/MP3；metadata.media 列出 {url, field}。也接受 JSON 调试请求。messages 为小鹅通原始主播消息数组。",
                     responseFormat: "data.accepted 为本次新增入队数量；重复消息返回 0。"),
         APIEndpoint(name: "直播队列状态", method: "GET", path: "/api/live/status",
-                    summary: "查看识别和推送队列状态，需要 Bearer 令牌。", requestDemo: "",
-                    getParameters: "Authorization: Bearer <直播设置中的令牌>",
+                    summary: "查看本机识别和推送队列状态，无需令牌。", requestDemo: "",
+                    getParameters: "无参数。",
                     responseFormat: "data.text 包含队列状态。"),
         APIEndpoint(
             name: "Skill Documentation",
@@ -828,7 +828,6 @@ enum SkillDocument {
 }
 
 enum APIRequestError: Error, Equatable, LocalizedError {
-    case unauthorized(String)
     case badRequest(String)
     case notFound(String)
     case methodNotAllowed(String)
@@ -836,8 +835,6 @@ enum APIRequestError: Error, Equatable, LocalizedError {
 
     var statusCode: Int {
         switch self {
-        case .unauthorized:
-            return 401
         case .badRequest:
             return 400
         case .notFound:
@@ -851,8 +848,7 @@ enum APIRequestError: Error, Equatable, LocalizedError {
 
     var message: String {
         switch self {
-        case let .unauthorized(message),
-            let .badRequest(message),
+        case let .badRequest(message),
             let .notFound(message),
             let .methodNotAllowed(message),
             let .internalError(message):
@@ -1125,8 +1121,6 @@ enum HTTPResponseBuilder {
             return "OK"
         case 400:
             return "Bad Request"
-        case 401:
-            return "Unauthorized"
         case 404:
             return "Not Found"
         case 405:

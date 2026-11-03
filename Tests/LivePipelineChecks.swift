@@ -60,9 +60,6 @@ struct LiveChecks {
         let badRequest = Data("POST /api/live/messages HTTP/1.1\r\nContent-Length: -1\r\n\r\n".utf8)
         do { _ = try HTTPRequestParser.parse(buffer: badRequest); throw NSError(domain: "negative length accepted", code: 1) }
         catch is APIRequestError { }
-        let request = HTTPRequestMessage(method: .post, target: "/api/live/messages", path: "/api/live/messages", queryItems: [], headers: [:], body: Data())
-        do { try await pipeline.authorize(request); throw NSError(domain: "missing token accepted", code: 1) }
-        catch APIRequestError.unauthorized { }
 
         let binary = Data([0, 255, 128, 13, 10, 42]) + Data("\r\n--test-boundary-not-a-delimiter".utf8)
         var multipart = Data("--test-boundary\r\nContent-Disposition: form-data; name=\"metadata\"\r\n\r\n{}\r\n--test-boundary\r\nContent-Disposition: form-data; name=\"media0\"; filename=\"audio.mp3\"\r\nContent-Type: audio/mpeg\r\n\r\n".utf8)
@@ -101,6 +98,6 @@ struct LiveChecks {
             _ = try await mediaStore.ingest(mediaBatch, files: [:])
             throw NSError(domain: "missing upload accepted", code: 1)
         } catch is APIRequestError { }
-        print("通过：持久化恢复、批次去重、推送确认、失败重试、图片去重、通知分段、鉴权、HTTP 校验、multipart 二进制、上传落盘、私有 URL 的本地识别、中文 OCR")
+        print("通过：持久化恢复、批次去重、推送确认、失败重试、图片去重、通知分段、HTTP 校验、multipart 二进制、上传落盘、私有 URL 的本地识别、中文 OCR")
     }
 }

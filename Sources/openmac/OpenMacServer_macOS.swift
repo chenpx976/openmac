@@ -445,7 +445,6 @@ private struct OpenMacRequestRouter {
             let data: APIResponseData
             switch request.path {
             case "/api/live/messages":
-                try await LivePipeline.shared.authorize(request)
                 guard request.method == .post else { throw APIRequestError.methodNotAllowed("Use POST") }
                 let batch: LiveBatch
                 var files = [String: Data]()
@@ -464,12 +463,10 @@ private struct OpenMacRequestRouter {
                 let accepted = try await LivePipeline.shared.ingest(batch, files: files)
                 data = APIResponseData(accepted: accepted)
             case "/api/live/retry":
-                try await LivePipeline.shared.authorize(request)
                 guard request.method == .post else { throw APIRequestError.methodNotAllowed("Use POST") }
                 try await LivePipeline.shared.retryFailures()
                 data = APIResponseData(text: "失败消息已重新入队")
             case "/api/live/status":
-                try await LivePipeline.shared.authorize(request)
                 guard request.method == .get else { throw APIRequestError.methodNotAllowed("Use GET") }
                 data = APIResponseData(text: await LivePipeline.shared.statusText())
             case "/api/ocr":
