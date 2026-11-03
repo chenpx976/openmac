@@ -10,9 +10,9 @@ struct LiveSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("小鹅通直播 → 语音转写 / 图片 OCR → Bark")
+            Text("接收消息 → 语音转写 / 图片 OCR → 转发 Bark")
                 .font(.subheadline.weight(.semibold))
-            Text("插件直接连接本机服务，每 30 秒发送新增主播消息；关闭窗口后服务继续运行。")
+            Text("将文字、图片和音频发送到 OpenMac，处理后的消息可转发到 Bark。关闭窗口后服务继续运行。")
                 .font(.caption).foregroundStyle(.secondary)
             SecureField("Bark 完整地址：https://api.day.app/设备Key", text: $config.barkURL)
                 .textFieldStyle(.roundedBorder)

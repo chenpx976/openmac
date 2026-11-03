@@ -390,12 +390,12 @@ struct APIEndpoint: Identifiable, Equatable {
     }
 
     static let all: [APIEndpoint] = [
-        APIEndpoint(name: "直播消息入队", method: "POST", path: "/api/live/messages",
-                    summary: "持久化接收主播消息，自动语音转写、OCR 和 Bark 推送，无需令牌。",
-                    requestDemo: "{\"appId\":\"app_example\",\"aliveId\":\"l_example\",\"roomId\":\"XET#example\",\"title\":\"直播\",\"messages\":[]}",
-                    postParameters: "推荐 multipart/form-data：metadata 为批次 JSON，media0 等字段为原始图片/MP3；metadata.media 列出 {url, field}。也接受 JSON 调试请求。messages 为小鹅通原始主播消息数组。",
+        APIEndpoint(name: "接收消息", method: "POST", path: "/api/live/messages",
+                    summary: "接收并保存消息，支持语音转写、图片 OCR 和转发 Bark。",
+                    requestDemo: "{\"appId\":\"app_example\",\"aliveId\":\"l_example\",\"roomId\":\"XET#example\",\"title\":\"消息\",\"messages\":[]}",
+                    postParameters: "推荐 multipart/form-data：metadata 为批次 JSON，media0 等字段为原始图片/MP3；metadata.media 列出 {url, field}。也接受 JSON 调试请求。messages 为发送端提供的消息数组。",
                     responseFormat: "data.accepted 为本次新增入队数量；重复消息返回 0。"),
-        APIEndpoint(name: "直播队列状态", method: "GET", path: "/api/live/status",
+        APIEndpoint(name: "消息队列状态", method: "GET", path: "/api/live/status",
                     summary: "查看本机识别和推送队列状态，无需令牌。", requestDemo: "",
                     getParameters: "无参数。",
                     responseFormat: "data.text 包含队列状态。"),

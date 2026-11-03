@@ -90,7 +90,7 @@ struct LiveBatch: Codable {
               messages.count <= 10000,
               messages.allSatisfy({ !$0.comment_id.isEmpty && $0.comment_id.count < 256 && $0.user_type == 1
                   && $0.created_timestamp.isFinite }) else {
-            throw APIRequestError.badRequest("直播批次参数无效，仅接收主播消息")
+            throw APIRequestError.badRequest("消息批次参数无效，请检查发送端的数据格式")
         }
     }
 }
@@ -312,7 +312,7 @@ actor LivePipeline {
         }
         let format = DateFormatter()
         format.dateFormat = "MM-dd HH:mm:ss"
-        let name = message.comment_name ?? message.wx_nickname ?? "主播"
+        let name = message.comment_name ?? message.wx_nickname ?? "发送者"
         return "[\(format.string(from: Date(timeIntervalSince1970: message.created_timestamp)))] \(name)\n" + parts.joined(separator: "\n\n")
     }
 
@@ -345,7 +345,7 @@ actor LivePipeline {
               ["http", "https"].contains(parts.scheme), parts.user == nil, parts.password == nil,
               parts.port == nil || parts.port == 80 || parts.port == 443,
               ["myqcloud.com", "xiaoeknow.com"].contains(where: { host.hasSuffix("." + $0) }) else {
-            throw APIRequestError.badRequest("媒体地址必须属于小鹅通资源域名")
+            throw APIRequestError.badRequest("当前媒体地址不受支持，请使用文件上传")
         }
         parts.scheme = "https"
         parts.port = nil
@@ -428,7 +428,7 @@ actor LivePipeline {
                 request.timeoutInterval = 20
                 request.setValue("application/json", forHTTPHeaderField: "Content-Type")
                 request.httpBody = try JSONSerialization.data(withJSONObject: [
-                    "title": notification.title, "body": notification.body, "group": "小鹅通直播", "isArchive": 1
+                    "title": notification.title, "body": notification.body, "group": "OpenMac 消息", "isArchive": 1
                 ])
                 let (data, response) = try await send(request)
                 let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any]

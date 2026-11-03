@@ -13,7 +13,7 @@ private final class SpeechOperation {
 
     func run(file: URL) async throws -> String {
         guard SFSpeechRecognizer.authorizationStatus() == .authorized else {
-            throw APIRequestError.badRequest("请先在直播消息设置中授权语音识别")
+            throw APIRequestError.badRequest("请先在消息转发设置中授权语音识别")
         }
         guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "zh-CN")),
               recognizer.isAvailable, recognizer.supportsOnDeviceRecognition else {
@@ -63,7 +63,7 @@ enum SpeechTranscriber {
         }
     }
 
-    /// 分成最多 50 秒的小段，兼容直播中超过一分钟的语音。
+    /// 分成最多 50 秒的小段，支持超过一分钟的语音。
     static func transcribe(file: URL) async throws -> String {
         let asset = AVURLAsset(url: file)
         let duration = try await asset.load(.duration).seconds

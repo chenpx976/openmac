@@ -194,7 +194,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = openmac;
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "将直播语音在本机转换为文字，用于消息整理与推送。";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "将收到的语音消息在本机转换为文字，用于消息整理与转发。";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -225,7 +225,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = openmac;
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "将直播语音在本机转换为文字，用于消息整理与推送。";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "将收到的语音消息在本机转换为文字，用于消息整理与转发。";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",

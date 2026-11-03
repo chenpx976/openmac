@@ -1,7 +1,7 @@
 ![logo](./assets/AppIcon128.png)
 # OpenMac
 
-本分支新增小鹅通直播消息接收、语音转写、中文 OCR 与 Bark 推送，使用方法见 [直播消息说明](LIVE_MESSAGES.md)。
+本分支支持接收文字、图片和音频消息，完成语音转写、中文 OCR，并可转发到 Bark。使用方法见 [消息接收与转发](LIVE_MESSAGES.md)。
 
 OpenMac runs a local HTTP server and provides APIs for image OCR recognition, multilingual translation, web page content retrieval, face and facial location recognition, QR code/barcode recognition in images, and text-to-speech (TTS) capabilities. This service is based on the above functions provided by the native macOS system and is completely free without incurring any additional costs.
 

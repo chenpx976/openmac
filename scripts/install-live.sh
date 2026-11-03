@@ -21,4 +21,4 @@ ditto .build/live/Build/Products/Debug/openmac.app "$app"
 codesign --force --deep --sign - --identifier com.chenpx976.openmac.live \
   --requirements '=designated => identifier "com.chenpx976.openmac.live"' "$app"
 open "$app"
-printf '已安装：%s\n首次使用：在直播消息页授权语音识别，并在 Config 中开启 Launch at Login。\n' "$app"
+printf '已安装：%s\n首次使用：在消息转发页授权语音识别，并在 Config 中开启 Launch at Login。\n' "$app"

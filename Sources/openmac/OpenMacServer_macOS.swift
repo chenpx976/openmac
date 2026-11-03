@@ -459,7 +459,7 @@ private struct OpenMacRequestRouter {
                         batch = try JSONDecoder().decode(LiveBatch.self, from: request.body)
                     }
                 } catch let error as APIRequestError { throw error }
-                catch { throw APIRequestError.badRequest("直播消息 JSON 格式无效") }
+                catch { throw APIRequestError.badRequest("消息 JSON 格式无效") }
                 let accepted = try await LivePipeline.shared.ingest(batch, files: files)
                 data = APIResponseData(accepted: accepted)
             case "/api/live/retry":
@@ -1524,7 +1524,7 @@ struct OpenMacView: View {
             Picker("", selection: $selectedTab) {
                 Text("APIs").tag(0)
                 Text("Config").tag(1)
-                Text("直播消息").tag(2)
+                Text("消息转发").tag(2)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
