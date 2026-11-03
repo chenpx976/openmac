@@ -255,6 +255,7 @@ struct APIResponseData: Encodable, Equatable {
     let audio: String?
     let image: String?
     let list: [SearchResultItem]?
+    let accepted: Int?
 
     init(
         text: String? = nil,
@@ -264,7 +265,8 @@ struct APIResponseData: Encodable, Equatable {
         barcodes: [BarcodeObservation]? = nil,
         audio: String? = nil,
         image: String? = nil,
-        list: [SearchResultItem]? = nil
+        list: [SearchResultItem]? = nil,
+        accepted: Int? = nil
     ) {
         self.text = text
         self.lines = lines
@@ -274,6 +276,7 @@ struct APIResponseData: Encodable, Equatable {
         self.audio = audio
         self.image = image
         self.list = list
+        self.accepted = accepted
     }
 }
 
@@ -387,6 +390,15 @@ struct APIEndpoint: Identifiable, Equatable {
     }
 
     static let all: [APIEndpoint] = [
+        APIEndpoint(name: "直播消息入队", method: "POST", path: "/api/live/messages",
+                    summary: "持久化接收主播消息，自动语音转写、OCR 和 Bark 推送。需要 Bearer 令牌。",
+                    requestDemo: "{\"appId\":\"app_example\",\"aliveId\":\"l_example\",\"roomId\":\"XET#example\",\"title\":\"直播\",\"messages\":[]}",
+                    postParameters: "Authorization: Bearer <直播设置中的令牌>。推荐 multipart/form-data：metadata 为批次 JSON，media0 等字段为原始图片/MP3；metadata.media 列出 {url, field}。也接受 JSON 调试请求。messages 为小鹅通原始主播消息数组。",
+                    responseFormat: "data.accepted 为本次新增入队数量；重复消息返回 0。"),
+        APIEndpoint(name: "直播队列状态", method: "GET", path: "/api/live/status",
+                    summary: "查看识别和推送队列状态，需要 Bearer 令牌。", requestDemo: "",
+                    getParameters: "Authorization: Bearer <直播设置中的令牌>",
+                    responseFormat: "data.text 包含队列状态。"),
         APIEndpoint(
             name: "Skill Documentation",
             method: "GET",
@@ -816,6 +828,7 @@ enum SkillDocument {
 }
 
 enum APIRequestError: Error, Equatable, LocalizedError {
+    case unauthorized(String)
     case badRequest(String)
     case notFound(String)
     case methodNotAllowed(String)
@@ -823,6 +836,8 @@ enum APIRequestError: Error, Equatable, LocalizedError {
 
     var statusCode: Int {
         switch self {
+        case .unauthorized:
+            return 401
         case .badRequest:
             return 400
         case .notFound:
@@ -836,7 +851,8 @@ enum APIRequestError: Error, Equatable, LocalizedError {
 
     var message: String {
         switch self {
-        case let .badRequest(message),
+        case let .unauthorized(message),
+            let .badRequest(message),
             let .notFound(message),
             let .methodNotAllowed(message),
             let .internalError(message):
@@ -851,6 +867,7 @@ enum APIRequestError: Error, Equatable, LocalizedError {
 
 enum HTTPRequestParser {
     static func parse(buffer: Data) throws -> (request: HTTPRequestMessage, consumedLength: Int)? {
+        guard buffer.count <= 32 * 1024 * 1024 else { throw APIRequestError.badRequest("Request exceeds 32MB") }
         guard let separatorRange = buffer.range(of: Data("\r\n\r\n".utf8)) ?? buffer.range(of: Data("\n\n".utf8)) else {
             return nil
         }
@@ -873,7 +890,11 @@ enum HTTPRequestParser {
 
         let target = String(requestLineParts[1])
         let headers = parseHeaders(from: Array(headerLines.dropFirst()))
-        let contentLength = headers["content-length"].flatMap(Int.init) ?? 0
+        guard headers["transfer-encoding"] == nil,
+              let contentLength = Int(headers["content-length"] ?? "0"),
+              contentLength >= 0, contentLength <= 32 * 1024 * 1024 else {
+            throw APIRequestError.badRequest("Invalid Content-Length or unsupported transfer encoding")
+        }
 
         let totalLength = separatorRange.upperBound + contentLength
         guard buffer.count >= totalLength else {
@@ -1104,6 +1125,8 @@ enum HTTPResponseBuilder {
             return "OK"
         case 400:
             return "Bad Request"
+        case 401:
+            return "Unauthorized"
         case 404:
             return "Not Found"
         case 405:

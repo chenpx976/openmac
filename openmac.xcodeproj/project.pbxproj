@@ -11,6 +11,10 @@
 		A1B2C3D4E5F6000000000001 /* openmac.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000011 /* openmac.swift */; };
 		A1B2C3D4E5F6000000000002 /* OpenMacCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000012 /* OpenMacCore.swift */; };
 		A1B2C3D4E5F6000000000003 /* OpenMacServer_macOS.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000013 /* OpenMacServer_macOS.swift */; };
+		B1B2C3D4E5F6000000000000 /* LivePipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1B2C3D4E5F6000000000010 /* LivePipeline.swift */; };
+		B1B2C3D4E5F6000000000001 /* SpeechTranscriber.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1B2C3D4E5F6000000000011 /* SpeechTranscriber.swift */; };
+		B1B2C3D4E5F6000000000002 /* LiveSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1B2C3D4E5F6000000000012 /* LiveSettingsView.swift */; };
+		B1B2C3D4E5F6000000000003 /* LiveMultipart.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1B2C3D4E5F6000000000013 /* LiveMultipart.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -20,6 +24,10 @@
 		A1B2C3D4E5F6000000000012 /* OpenMacCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenMacCore.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F6000000000013 /* OpenMacServer_macOS.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenMacServer_macOS.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F6000000000014 /* openmac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = openmac.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B1B2C3D4E5F6000000000010 /* LivePipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivePipeline.swift; sourceTree = "<group>"; };
+		B1B2C3D4E5F6000000000011 /* SpeechTranscriber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechTranscriber.swift; sourceTree = "<group>"; };
+		B1B2C3D4E5F6000000000012 /* LiveSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSettingsView.swift; sourceTree = "<group>"; };
+		B1B2C3D4E5F6000000000013 /* LiveMultipart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveMultipart.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -46,6 +54,10 @@
 		A1B2C3D4E5F6000000000032 /* Sources/openmac */ = {
 			isa = PBXGroup;
 			children = (
+				B1B2C3D4E5F6000000000010 /* LivePipeline.swift */,
+				B1B2C3D4E5F6000000000011 /* SpeechTranscriber.swift */,
+				B1B2C3D4E5F6000000000012 /* LiveSettingsView.swift */,
+				B1B2C3D4E5F6000000000013 /* LiveMultipart.swift */,
 				A1B2C3D4E5F6000000000011 /* openmac.swift */,
 				A1B2C3D4E5F6000000000012 /* OpenMacCore.swift */,
 				A1B2C3D4E5F6000000000013 /* OpenMacServer_macOS.swift */,
@@ -132,6 +144,10 @@
 			files = (
 				A1B2C3D4E5F6000000000002 /* OpenMacCore.swift in Sources */,
 				A1B2C3D4E5F6000000000003 /* OpenMacServer_macOS.swift in Sources */,
+				B1B2C3D4E5F6000000000000 /* LivePipeline.swift in Sources */,
+				B1B2C3D4E5F6000000000001 /* SpeechTranscriber.swift in Sources */,
+				B1B2C3D4E5F6000000000002 /* LiveSettingsView.swift in Sources */,
+				B1B2C3D4E5F6000000000003 /* LiveMultipart.swift in Sources */,
 				A1B2C3D4E5F6000000000001 /* openmac.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -178,13 +194,14 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = openmac;
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "将直播语音在本机转换为文字，用于消息整理与推送。";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				MARKETING_VERSION = 0.5;
-				PRODUCT_BUNDLE_IDENTIFIER = com.echosoar.openmac;
+				PRODUCT_BUNDLE_IDENTIFIER = com.chenpx976.openmac.live;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = macosx;
@@ -208,13 +225,14 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = openmac;
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "将直播语音在本机转换为文字，用于消息整理与推送。";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				MARKETING_VERSION = 0.5;
-				PRODUCT_BUNDLE_IDENTIFIER = com.echosoar.openmac;
+				PRODUCT_BUNDLE_IDENTIFIER = com.chenpx976.openmac.live;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = macosx;

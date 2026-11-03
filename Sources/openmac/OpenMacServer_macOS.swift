@@ -17,7 +17,7 @@ func openmacLog(_ message: String) {
 
 @MainActor
 final class OpenMacAppModel: ObservableObject {
-    @Published var portText = "8080"
+    @Published var portText = UserDefaults.standard.string(forKey: "serverPort") ?? "8080"
     @Published var isEnabled = false
     @Published var isPresentingError = false
     @Published private(set) var errorMessage = ""
@@ -38,6 +38,17 @@ final class OpenMacAppModel: ObservableObject {
 
     private var server: OpenMacHTTPServer?
 
+    init() {
+        if ProcessInfo.processInfo.arguments.contains("--enable-login") {
+            LaunchAtLoginService.setEnabled(true)
+            launchAtLogin = LaunchAtLoginService.isEnabled
+        }
+        if ProcessInfo.processInfo.arguments.contains("--authorize-speech") {
+            Task { _ = await SpeechTranscriber.authorize() }
+        }
+        if UserDefaults.standard.bool(forKey: "serverEnabled") { startServer() }
+    }
+
     func toggleServer(_ enabled: Bool) {
         if enabled {
             startServer()
@@ -47,6 +58,7 @@ final class OpenMacAppModel: ObservableObject {
     }
 
     func startServer() {
+        guard server == nil else { return }
         do {
             let port = try validatedPort()
             let server = try OpenMacHTTPServer(port: port)
@@ -63,6 +75,9 @@ final class OpenMacAppModel: ObservableObject {
             // .failed asynchronously (e.g. "Address already in use" arrives via
             // stateHandler, not as a throw here).
             isEnabled = true
+            UserDefaults.standard.set(true, forKey: "serverEnabled")
+            UserDefaults.standard.set(portText, forKey: "serverPort")
+            Task { await LivePipeline.shared.start() }
             openmacLog("Server enabling on port \(port)")
         } catch {
             presentFailure(error.localizedDescription)
@@ -73,6 +88,8 @@ final class OpenMacAppModel: ObservableObject {
         server?.stop()
         server = nil
         isEnabled = false
+        UserDefaults.standard.set(false, forKey: "serverEnabled")
+        Task { await LivePipeline.shared.stop() }
     }
 
     private func handleServerStateChange(_ state: ServerLifecycleState) {
@@ -90,6 +107,7 @@ final class OpenMacAppModel: ObservableObject {
         server = nil
         isEnabled = false
         errorMessage = message
+        Task { await LivePipeline.shared.stop() }
         isPresentingError = true
         openmacLog("Failed to start server: \(message)")
     }
@@ -238,7 +256,9 @@ final class OpenMacHTTPServer {
         }
 
         self.port = port
-        listener = try NWListener(using: .tcp, on: nwPort)
+        let parameters = NWParameters.tcp
+        parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: nwPort)
+        listener = try NWListener(using: parameters)
     }
 
     func start() throws {
@@ -403,7 +423,7 @@ private final class ConnectionHandler {
     }
 }
 
-private struct OCRResult {
+struct OCRResult {
     let lines: [String]
 
     var text: String {
@@ -424,6 +444,34 @@ private struct OpenMacRequestRouter {
         do {
             let data: APIResponseData
             switch request.path {
+            case "/api/live/messages":
+                try await LivePipeline.shared.authorize(request)
+                guard request.method == .post else { throw APIRequestError.methodNotAllowed("Use POST") }
+                let batch: LiveBatch
+                var files = [String: Data]()
+                do {
+                    if request.headers["content-type"]?.lowercased().hasPrefix("multipart/form-data") == true {
+                        files = try LiveMultipart(body: request.body, contentType: request.headers["content-type"]!).fields
+                        guard let metadata = files.removeValue(forKey: "metadata") else {
+                            throw APIRequestError.badRequest("缺少 metadata 字段")
+                        }
+                        batch = try JSONDecoder().decode(LiveBatch.self, from: metadata)
+                    } else {
+                        batch = try JSONDecoder().decode(LiveBatch.self, from: request.body)
+                    }
+                } catch let error as APIRequestError { throw error }
+                catch { throw APIRequestError.badRequest("直播消息 JSON 格式无效") }
+                let accepted = try await LivePipeline.shared.ingest(batch, files: files)
+                data = APIResponseData(accepted: accepted)
+            case "/api/live/retry":
+                try await LivePipeline.shared.authorize(request)
+                guard request.method == .post else { throw APIRequestError.methodNotAllowed("Use POST") }
+                try await LivePipeline.shared.retryFailures()
+                data = APIResponseData(text: "失败消息已重新入队")
+            case "/api/live/status":
+                try await LivePipeline.shared.authorize(request)
+                guard request.method == .get else { throw APIRequestError.methodNotAllowed("Use GET") }
+                data = APIResponseData(text: await LivePipeline.shared.statusText())
             case "/api/ocr":
                 data = try await handleOCR(request)
             case "/api/translate":
@@ -575,7 +623,7 @@ private struct ImageDataLoader {
     }
 }
 
-private struct OCRService {
+struct OCRService {
     func recognizeText(in imageData: Data) throws -> OCRResult {
         guard let imageSource = CGImageSourceCreateWithData(imageData as CFData, nil),
               let cgImage = CGImageSourceCreateImageAtIndex(imageSource, 0, nil) else {
@@ -594,6 +642,8 @@ private struct OCRService {
             lines = observations.compactMap { $0.topCandidates(1).first?.string }
         }
         request.recognitionLevel = .accurate
+        let supported = try request.supportedRecognitionLanguages()
+        request.recognitionLanguages = ["zh-Hans", "zh-Hant", "en-US"].filter { supported.contains($0) }
         request.usesLanguageCorrection = true
 
         let handler = VNImageRequestHandler(cgImage: cgImage)
@@ -1477,6 +1527,7 @@ struct OpenMacView: View {
             Picker("", selection: $selectedTab) {
                 Text("APIs").tag(0)
                 Text("Config").tag(1)
+                Text("直播消息").tag(2)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -1491,6 +1542,8 @@ struct OpenMacView: View {
                     .padding(.trailing, 2)
                 }
                 .frame(minHeight: 260)
+            } else if selectedTab == 2 {
+                LiveSettingsView().frame(minHeight: 260)
             } else {
                 ConfigView()
                     .frame(minHeight: 260)
