@@ -40,6 +40,26 @@ bash scripts/install-live.sh
 
 Bark 转发失败每 30 秒重试。成功回执表示 Bark 服务接受，不能证明手机已经展示通知。如果服务接受后、写入本机确认前应用退出，重试可能重复通知。
 
+## 导出 Markdown
+
+发送端可将消息批次的 `notify` 设为 `false`，只进行识别和整理，不创建 Bark 通知。已有消息直接复用结果；同一消息之后用于正常转发时，仍可发送一次。
+
+通过 `POST /api/live/export` 查询导出进度：
+
+```json
+{"appId":"app_example","aliveId":"source_example","roomId":"room_example","title":"消息记录","commentIds":["message_1","message_2"]}
+```
+
+响应的 `data.document` 包含：
+
+- `total`：去重后的消息总数。
+- `completed`：已完成处理的条数（包含最终失败）。
+- `failed`：最终识别失败的条数。
+- `missing`：尚未接收的消息 ID，可只上传这些消息及其附件。
+- `markdown`：全部处理完成时提供，内容按时间排列，标明识别失败，不附带音频文件。
+
+实时转发任务优先于批量导出处理；已有识别结果和附件缓存共用。导出只读已完成结果，遇到旧版中文 OCR 结果会先重新处理再输出。
+
 ## 本机 HTTP 接口
 
 服务只监听 `127.0.0.1`，无需 Authorization 请求头。
@@ -48,6 +68,7 @@ Bark 转发失败每 30 秒重试。成功回执表示 Bark 服务接受，不�
 |---|---|
 | `POST /api/live/messages` | 接收消息和附件，持久化成功后返回确认 |
 | `GET /api/live/status` | 查看消息处理与转发状态 |
+| `POST /api/live/export` | 查询指定消息的处理进度，完成后返回 Markdown |
 | `POST /api/live/retry` | 将识别失败的消息重新入队 |
 
 消息接口使用 `multipart/form-data`：
@@ -77,7 +98,7 @@ bash scripts/test-live.sh
 xcodebuild -project openmac.xcodeproj -scheme openmac -configuration Debug CODE_SIGNING_ALLOWED=NO build
 ```
 
-测试覆盖持久化恢复、去重、转发确认与失败重试、通知分段、图片去重、HTTP 校验、multipart 二进制保真、上传落盘和中文 OCR。测试使用模拟通知传输，不访问真实 Bark。
+测试覆盖持久化恢复、去重、转发确认与失败重试、通知分段、图片去重、HTTP 校验、multipart 二进制保真、上传落盘、中文 OCR、Markdown 导出与推送隔离。测试使用模拟通知传输，不访问真实 Bark。
 
 安装脚本为本机开发版本固定签名要求，避免重编译导致隐私授权丢失。对外发布应使用自己的 Developer ID 签名并公证。
 

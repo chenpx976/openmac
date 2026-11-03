@@ -84,6 +84,7 @@ struct LiveBatch: Codable {
     let title: String
     let messages: [LiveMessage]
     var media: [LiveMediaReference]? = nil
+    var notify: Bool? = nil
     var roomKey: String { "\(appId):\(aliveId):\(roomId)" }
     func validate() throws {
         guard [appId, aliveId, roomId, title].allSatisfy({ !$0.isEmpty && $0.count <= 1000 }),
@@ -101,10 +102,12 @@ struct LiveJob: Codable {
     let title: String
     let message: LiveMessage
     var result: String?
+    var recognitionVersion: Int? = nil
     var attempts = 0
     var retryAt = Date.distantPast
     var error: String?
     var notified = false
+    var notify: Bool? = nil
     var mediaFiles: [String: String]? = nil
 }
 
@@ -212,8 +215,13 @@ actor LivePipeline {
                 if known.insert(key).inserted {
                     var job = LiveJob(key: key, room: batch.roomKey, title: batch.title, message: message)
                     job.mediaFiles = mediaFiles
+                    job.notify = batch.notify
                     next.jobs.append(job)
                     added += 1
+                } else if batch.notify != false,
+                          let index = next.jobs.firstIndex(where: { $0.key == key && $0.notify == false }) {
+                    // 导出任务也被实时监听收到时，允许它参与一次正常推送。
+                    next.jobs[index].notify = true
                 }
             }
         }
@@ -231,6 +239,64 @@ actor LivePipeline {
             }
         }
         lastError = ""
+    }
+
+    func markdownExport(_ request: MarkdownExportRequest) throws -> MarkdownExportState {
+        if let startupError { throw APIRequestError.internalError(startupError) }
+        guard [request.appId, request.aliveId, request.roomId, request.title].allSatisfy({ !$0.isEmpty && $0.count <= 1000 }),
+              request.commentIds.count <= 100_000, request.commentIds.allSatisfy({ !$0.isEmpty && $0.count < 256 }) else {
+            throw APIRequestError.badRequest("导出参数无效")
+        }
+        let room = "\(request.appId):\(request.aliveId):\(request.roomId)"
+        let ids = Set(request.commentIds)
+        let outdated = Set(state.jobs.filter {
+            $0.room == room && ids.contains($0.message.comment_id) && $0.result != nil && $0.error == nil
+                && $0.recognitionVersion != 2
+                && ($0.message.content_type == 2 || $0.message.more_info?["target_ppt"] != nil)
+        }.map(\.key))
+        if !outdated.isEmpty {
+            // 旧版未指定中文语言的 OCR 结果不能作为新导出的缓存。
+            try transaction { next in
+                for index in next.jobs.indices where outdated.contains(next.jobs[index].key) {
+                    next.jobs[index].result = nil
+                    next.jobs[index].attempts = 0
+                    next.jobs[index].retryAt = .distantPast
+                }
+            }
+        }
+        let jobs = state.jobs.filter { $0.room == room && ids.contains($0.message.comment_id) }
+            .sorted {
+                if $0.message.created_timestamp != $1.message.created_timestamp {
+                    return $0.message.created_timestamp < $1.message.created_timestamp
+                }
+                return $0.message.comment_id < $1.message.comment_id
+            }
+        let present = Set(jobs.map { $0.message.comment_id })
+        let missing = ids.subtracting(present).sorted()
+        let completed = jobs.filter { $0.result != nil }.count
+        let failed = jobs.filter { $0.result != nil && $0.error != nil }.count
+        var markdown: String?
+        if completed == ids.count {
+            let clean = { (text: String) in text.replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "\r", with: " ") }
+            let format = DateFormatter()
+            format.dateFormat = "yyyy-MM-dd HH:mm:ss"
+            var sections = ["# \(clean(request.title))", "已处理消息：\(ids.count) · 处理失败：\(failed)"]
+            for job in jobs {
+                let message = job.message
+                let time = format.string(from: Date(timeIntervalSince1970: message.created_timestamp))
+                let name = clean(message.comment_name ?? message.wx_nickname ?? "发送者")
+                var section = "## \(time) · \(name)\n\n"
+                if let error = job.error {
+                    section += "> 处理失败：\(clean(error))\n\n消息 ID：\(message.comment_id)"
+                } else {
+                    // 结果首行是推送用的时间和发送者，Markdown 使用完整年份的标题。
+                    section += (job.result ?? "").split(separator: "\n", omittingEmptySubsequences: false).dropFirst().joined(separator: "\n")
+                }
+                sections.append(section)
+            }
+            markdown = sections.joined(separator: "\n\n") + "\n"
+        }
+        return MarkdownExportState(total: ids.count, completed: completed, failed: failed, missing: missing, markdown: markdown)
     }
 
     func statusText() -> String {
@@ -259,7 +325,9 @@ actor LivePipeline {
         processing = true
         defer { processing = false }
         do {
-            let jobs = state.jobs.filter { $0.result == nil && $0.retryAt <= Date() }.prefix(50)
+            let started = Date()
+            let jobs = state.jobs.filter { $0.result == nil && $0.retryAt <= Date() }
+                .sorted { ($0.notify != false ? 0 : 1) < ($1.notify != false ? 0 : 1) }.prefix(50)
             for job in jobs {
                 try Task.checkCancellation()
                 do {
@@ -267,6 +335,7 @@ actor LivePipeline {
                     try transaction { next in
                         guard let index = next.jobs.firstIndex(where: { $0.key == job.key }) else { return }
                         next.jobs[index].result = text
+                        next.jobs[index].recognitionVersion = 2
                         next.jobs[index].error = nil
                     }
                 } catch is CancellationError { throw CancellationError() }
@@ -284,6 +353,8 @@ actor LivePipeline {
                         }
                     }
                 }
+                // 长识别完成后及时处理推送，让下一轮优先领取实时消息。
+                if Date().timeIntervalSince(started) >= 2 { break }
             }
             try enqueueNotifications()
             try await sendNotifications()
@@ -396,12 +467,12 @@ actor LivePipeline {
     }
 
     private func enqueueNotifications() throws {
-        let ready = state.jobs.filter { $0.result != nil && !$0.notified }
+        let ready = state.jobs.filter { $0.result != nil && !$0.notified && $0.notify != false }
         guard !ready.isEmpty else { return }
         try transaction { next in
             for room in Set(ready.map(\.room)).sorted() {
                 // 有失败重试中的较早消息时先等它，保持房间内的发送顺序。
-                let roomJobs = next.jobs.filter { $0.room == room && !$0.notified }
+                let roomJobs = next.jobs.filter { $0.room == room && !$0.notified && $0.notify != false }
                     .sorted { $0.message.created_timestamp < $1.message.created_timestamp }
                 let messages = Array(roomJobs.prefix(while: { $0.result != nil }))
                 guard !messages.isEmpty else { continue }

@@ -98,6 +98,33 @@ struct LiveChecks {
             _ = try await mediaStore.ingest(mediaBatch, files: [:])
             throw NSError(domain: "missing upload accepted", code: 1)
         } catch is APIRequestError { }
-        print("通过：持久化恢复、批次去重、推送确认、失败重试、图片去重、通知分段、HTTP 校验、multipart 二进制、上传落盘、私有 URL 的本地识别、中文 OCR")
+        let exports = LivePipeline(directory: directory.appendingPathComponent("exports"), configuration: config, send: transport)
+        var silent = LiveBatch(appId: "app-test", aliveId: "live-test", roomId: "export-room", title: "文字记录", messages: [privateImage, message])
+        silent.media = mediaBatch.media
+        silent.notify = false
+        let exportRequest = MarkdownExportRequest(appId: silent.appId, aliveId: silent.aliveId,
+            roomId: silent.roomId, title: silent.title, commentIds: [privateImage.comment_id, message.comment_id, message.comment_id])
+        let missing = try await exports.markdownExport(exportRequest)
+        try check(missing.missing.count == 2 && missing.markdown == nil, "导出应报告缺失消息并去重")
+        let pushCount = await requests.count
+        _ = try await exports.ingest(silent, files: ["media0": png])
+        let waiting = try await exports.markdownExport(exportRequest)
+        try check(waiting.completed == 0 && waiting.missing.isEmpty && waiting.markdown == nil, "识别未完成不能生成完整文档")
+        await exports.processOnce()
+        await exports.processOnce()
+        let document = try await exports.markdownExport(exportRequest)
+        try check(document.completed == 2 && document.failed == 0, "导出处理进度错误")
+        try check(document.markdown?.contains("中韩半导体") == true && document.markdown?.contains("测试新增消息") == true, "Markdown 应包含原文与 OCR")
+        let markdown = document.markdown!
+        try check(markdown.range(of: "测试新增消息")!.lowerBound < markdown.range(of: "中韩半导体")!.lowerBound, "Markdown 应按时间排序")
+        let afterExport = await requests.count
+        try check(!markdown.contains("<audio") && afterExport == pushCount, "导出不能附带音频或推送 Bark")
+        let exportRestart = LivePipeline(directory: directory.appendingPathComponent("exports"), configuration: config, send: transport)
+        try check(try await exportRestart.markdownExport(exportRequest).markdown == markdown, "重启后应复用导出结果")
+        silent.notify = true
+        _ = try await exports.ingest(silent, files: ["media0": png])
+        await exports.processOnce()
+        try check(await requests.count == pushCount + 1, "仅导出的消息随后进入监听时应正常推送一次")
+        print("通过：持久化恢复、批次去重、推送确认、失败重试、图片去重、通知分段、HTTP 校验、multipart 二进制、上传落盘、中文 OCR、Markdown 导出与推送隔离")
     }
 }

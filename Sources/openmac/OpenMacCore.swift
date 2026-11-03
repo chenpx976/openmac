@@ -246,6 +246,22 @@ struct BarcodeObservation: Encodable, Equatable {
 /// The payload-specific portion of a response (the `data` object). Unused
 /// fields are omitted from the encoded JSON (synthesized Encodable skips nil
 /// optionals), so an empty instance encodes to `{}`.
+struct MarkdownExportRequest: Codable {
+    let appId: String
+    let aliveId: String
+    let roomId: String
+    let title: String
+    let commentIds: [String]
+}
+
+struct MarkdownExportState: Encodable, Equatable {
+    let total: Int
+    let completed: Int
+    let failed: Int
+    let missing: [String]
+    let markdown: String?
+}
+
 struct APIResponseData: Encodable, Equatable {
     let text: String?
     let lines: [String]?
@@ -256,6 +272,7 @@ struct APIResponseData: Encodable, Equatable {
     let image: String?
     let list: [SearchResultItem]?
     let accepted: Int?
+    let document: MarkdownExportState?
 
     init(
         text: String? = nil,
@@ -266,7 +283,8 @@ struct APIResponseData: Encodable, Equatable {
         audio: String? = nil,
         image: String? = nil,
         list: [SearchResultItem]? = nil,
-        accepted: Int? = nil
+        accepted: Int? = nil,
+        document: MarkdownExportState? = nil
     ) {
         self.text = text
         self.lines = lines
@@ -277,6 +295,7 @@ struct APIResponseData: Encodable, Equatable {
         self.image = image
         self.list = list
         self.accepted = accepted
+        self.document = document
     }
 }
 
@@ -390,6 +409,11 @@ struct APIEndpoint: Identifiable, Equatable {
     }
 
     static let all: [APIEndpoint] = [
+        APIEndpoint(name: "导出 Markdown", method: "POST", path: "/api/live/export",
+                    summary: "查询处理进度，完成后返回整理好的 Markdown。",
+                    requestDemo: "{\"appId\":\"app_example\",\"aliveId\":\"l_example\",\"roomId\":\"room_example\",\"title\":\"消息记录\",\"commentIds\":[]}",
+                    postParameters: "指定消息来源和 commentIds。消息入队时设置 notify:false 可只处理、不推送。",
+                    responseFormat: "data.document 包含 total、completed、failed、missing；全部完成时包含 markdown。"),
         APIEndpoint(name: "接收消息", method: "POST", path: "/api/live/messages",
                     summary: "接收并保存消息，支持语音转写、图片 OCR 和转发 Bark。",
                     requestDemo: "{\"appId\":\"app_example\",\"aliveId\":\"l_example\",\"roomId\":\"XET#example\",\"title\":\"消息\",\"messages\":[]}",
