@@ -7,6 +7,7 @@ struct LiveSettingsView: View {
     @State private var status = "正在读取配置…"
     @State private var notice = ""
     @State private var loaded = false
+    @State private var speechPrompt = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -16,11 +17,16 @@ struct LiveSettingsView: View {
                 .font(.caption).foregroundStyle(.secondary)
             SecureField("Bark 完整地址：https://api.day.app/设备Key", text: $config.barkURL)
                 .textFieldStyle(.roundedBorder)
+            TextField("识别术语（可选，用顿号分隔名称和专业词）", text: $speechPrompt, axis: .vertical)
+                .textFieldStyle(.roundedBorder).lineLimit(2...4)
+            Text("术语用于引导识别，不会直接替换原文。修改后重新导出会重新识别语音。")
+                .font(.caption).foregroundStyle(.secondary)
             HStack {
                 Button("保存设置") {
                     Task {
                         do {
                             config.barkURL = config.barkURL.trimmingCharacters(in: .whitespacesAndNewlines)
+                            config.speechPrompt = speechPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
                             try await LivePipeline.shared.saveConfiguration(config)
                             notice = "设置已保存"
                         } catch { notice = error.localizedDescription }
@@ -48,7 +54,11 @@ struct LiveSettingsView: View {
             Spacer()
         }
         .task {
-            do { config = try LiveConfiguration.load(); loaded = true }
+            do {
+                config = try LiveConfiguration.load()
+                speechPrompt = config.speechPrompt ?? ""
+                loaded = true
+            }
             catch { notice = error.localizedDescription }
             status = await LivePipeline.shared.statusText()
         }

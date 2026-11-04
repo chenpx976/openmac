@@ -32,6 +32,12 @@ struct LiveChecks {
         do { _ = try emptyTranscript.finish(); throw NSError(domain: "empty speech accepted", code: 1) }
         catch is APIRequestError { }
 
+        let spoken = String(repeating: "这是第一句话，", count: 8) + "仓位是2.5成，汇率是6.7。" + String(repeating: "这是下一句话。", count: 8)
+        let readable = SpeechTextLayout.paragraphs(spoken)
+        try check(readable.contains("\n\n") && readable.contains("2.5") && readable.contains("6.7"), "应分段但不能拆坏数字")
+        try check(readable.replacingOccurrences(of: "\n", with: "") == spoken, "排版不能改写正文")
+        try check(SpeechTextLayout.paragraphs("你好 ， 世界 。") == "你好，世界。", "标点空格整理失败")
+
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         var config = LiveConfiguration()
@@ -75,6 +81,10 @@ struct LiveChecks {
         let longText = String(repeating: "中文🙂", count: 1000)
         let parts = LivePipeline.chunks(longText)
         try check(parts.joined() == longText && parts.allSatisfy { $0.utf8.count <= 1800 }, "通知分段损坏文本或超过字节限制")
+        let paragraphs = String(repeating: "甲", count: 200) + "\n\n" + String(repeating: "乙", count: 200)
+        let readableParts = LivePipeline.chunks(paragraphs, limit: 1000)
+        try check(readableParts.count == 2 && readableParts[0].hasSuffix("\n\n") && readableParts.joined() == paragraphs,
+            "应优先在段落边界分条，且不丢失换行")
         let badRequest = Data("POST /api/live/messages HTTP/1.1\r\nContent-Length: -1\r\n\r\n".utf8)
         do { _ = try HTTPRequestParser.parse(buffer: badRequest); throw NSError(domain: "negative length accepted", code: 1) }
         catch is APIRequestError { }
@@ -113,7 +123,7 @@ struct LiveChecks {
         try check(try await fixedSpeech.markdownExport(voiceRequest).completed == 0, "旧语音缓存应失效")
         await fixedSpeech.processOnce()
         let repaired = try await fixedSpeech.markdownExport(voiceRequest)
-        try check(repaired.failed == 0 && repaired.markdown?.contains("完整前句\n后句") == true, "重识别结果未进入导出")
+        try check(repaired.failed == 0 && repaired.markdown?.contains("完整前句\n\n后句") == true, "重识别结果未进入导出")
         try check(await requests.count == notificationsBeforeRepair, "修复旧缓存不能重发通知")
         try check(try await fixedSpeech.markdownExport(voiceRequest).completed == 1, "新版本缓存不应反复失效")
 
@@ -139,6 +149,11 @@ struct LiveChecks {
         let beforeExportSend = await requests.count
         await resumedExport.processOnce()
         try check(await requests.count == beforeExportSend + partCount, "重启后应继续发送全部 Markdown 分段")
+        let sentBodies = await requests.bodies
+        let sentMarkdown = try JSONSerialization.jsonObject(with: sentBodies[beforeExportSend]) as! [String: Any]
+        try check(sentMarkdown["markdown"] as? String == sentMarkdown["body"] as? String,
+            "Markdown 渲染内容必须与旧版回退正文一致")
+        try check((sentMarkdown["body"] as? String)?.contains("\n\n") == true, "JSON 正文必须包含真实段落换行")
         _ = try await resumedExport.notifyMarkdown(exportNotice)
         await resumedExport.processOnce()
         try check(await requests.count == beforeExportSend + partCount, "已发送导出的重试不能再次推送")

@@ -4,9 +4,10 @@
 
 ## 安装与使用
 
-需要 macOS 13+ 和 Xcode。中文离线语音识别取决于设备及系统语言模型是否支持。
+需要 macOS 13.3+ 和 Xcode 26+。安装本地 Whisper 模型后，应用直接通过 SPM 引用的官方 whisper.cpp XCFramework 在进程内识别，支持 Metal 和 Flash Attention。
 
 ```sh
+bash scripts/install-whisper-model.sh  # 首次下载并校验约 574MB 的 Turbo Q5_0 模型
 bash scripts/install-live.sh
 ```
 
@@ -14,7 +15,7 @@ bash scripts/install-live.sh
 
 1. 启动 OpenMac，设置 HTTP 端口（默认 **8080**），打开服务开关。
 2. 在“消息转发”页填写 Bark 完整地址，例如 `https://api.day.app/设备Key/`，点击“保存设置”。
-3. 如需处理音频，点击“授权语音识别”，并开启系统设置 → 键盘 → 听写。
+3. 查看状态中的语音引擎，应显示“Whisper Turbo Q5_0 · Metal”。可填写少量识别术语，引导专有名称识别；修改后再次导出会重新识别相关语音。未安装 Whisper 模型时使用系统识别，旧系统需授权语音识别并开启听写。
 4. 让发送端把消息和附件发送到本机服务，无需令牌。
 5. 在 Config 中开启 **Launch at Login**，即可登录后自动启动。应用会保存服务开关和端口。
 
@@ -22,7 +23,8 @@ bash scripts/install-live.sh
 
 配置和消息保存在 `~/Library/Application Support/OpenMacLive/`：
 
-- `config.json`：Bark 地址。
+- `config.json`：Bark 地址和可选识别术语。
+- `models/`：本地语音模型。
 - `queue.json`：收到的消息、识别结果和转发队列。
 - `media/`：发送端上传的原始媒体文件。
 
@@ -30,11 +32,11 @@ bash scripts/install-live.sh
 
 - **文字**：保留内容并整理发送者、时间等信息。
 - **图片**：使用 Vision 识别简体中文、繁体中文和英文。
-- **音频**：使用 Speech 在本机转写；较长音频自动分成最多 50 秒一段。
+- **音频**：默认使用 `large-v3-turbo Q5_0`，模型常驻复用，音频由 AVFoundation 转成 16kHz 单声道。术语仅作为识别提示，不做强制文字替换。未安装模型时，macOS 26 使用 SpeechAnalyzer；旧系统使用分段 Speech。
 - **关联图片**：音频所附图片也可识别，与转写结果一起整理。
-- **Bark 转发**：按消息顺序汇总，长通知自动拆分，使用“OpenMac 消息”分组。
+- **Bark 转发**：语音正文按句子和短段落排版，段落之间留空行。每条正文约 1000 UTF-8 字节，优先在段落或句末分条，使用“OpenMac 消息”分组。Markdown 导出同时提供 Bark 的 `markdown` 字段和兼容旧版的 `body` 字段，两个字段正文完全一致。
 
-没有填写 Bark 地址时，消息仍会保存和处理，通知留在本地等待。识别结果按文件内容缓存，重复附件无需再次识别。
+没有填写 Bark 地址时，消息仍会保存和处理，通知留在本地等待。识别结果按文件内容、引擎和术语提示缓存，重复附件无需再次识别。有积压任务时连续处理，不在每条之后固定等待两秒。
 
 识别失败会重试三次，之后保留原始消息并发送错误说明。修复权限或其他问题后，可点击“重新识别失败消息”。语音识别可能出现同音词错误，不会自动改写原意。
 
@@ -98,10 +100,13 @@ Bark 转发失败每 30 秒重试。成功回执表示 Bark 服务接受，不�
 
 ```sh
 bash scripts/test-live.sh
+swift test --package-path Packages/WhisperRuntime
 xcodebuild -project openmac.xcodeproj -scheme openmac -configuration Debug CODE_SIGNING_ALLOWED=NO build
 ```
 
 测试覆盖持久化恢复、去重、转发确认与失败重试、通知分段、图片去重、HTTP 校验、multipart 二进制保真、上传落盘、中文 OCR、Markdown 导出与推送隔离。测试使用模拟通知传输，不访问真实 Bark。
+
+`Packages/WhisperRuntime` 是本地薄封装，按上游 SPM 示例引用官方 v1.9.2 XCFramework，并固定 SHA-256。运行时不依赖 Python 或 Homebrew 命令行程序。包内的 MP3 测试素材是 440Hz 合成音，不含用户音频。可用 `swift run --package-path Packages/WhisperRuntime whisper-benchmark MODEL PROMPT AUDIO [AUDIO...]` 测量单条识别时间，首次调用包含模型及 GPU 初始化。
 
 安装脚本为本机开发版本固定签名要求，避免重编译导致隐私授权丢失。对外发布应使用自己的 Developer ID 签名并公证。
 

@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		C1B2C3D4E5F6000000000001 /* WhisperRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = C1B2C3D4E5F6000000000002 /* WhisperRuntime */; };
 		5B87580B2FE7B9C100DD9159 /* Assets.xcassets    .xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5B87580A2FE7B9C100DD9159 /* Assets.xcassets    .xcassets */; };
 		A1B2C3D4E5F6000000000001 /* openmac.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000011 /* openmac.swift */; };
 		A1B2C3D4E5F6000000000002 /* OpenMacCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000012 /* OpenMacCore.swift */; };
@@ -35,6 +36,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C1B2C3D4E5F6000000000001 /* WhisperRuntime in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -89,6 +91,9 @@
 			dependencies = (
 			);
 			name = openmac;
+			packageProductDependencies = (
+				C1B2C3D4E5F6000000000002 /* WhisperRuntime */,
+			);
 			productName = openmac;
 			productReference = A1B2C3D4E5F6000000000014 /* openmac.app */;
 			productType = "com.apple.product-type.application";
@@ -118,6 +123,9 @@
 			);
 			mainGroup = A1B2C3D4E5F6000000000031;
 			productRefGroup = A1B2C3D4E5F6000000000033 /* Products */;
+			packageReferences = (
+				C1B2C3D4E5F6000000000003 /* WhisperRuntime */,
+			);
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -154,14 +162,29 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		C1B2C3D4E5F6000000000003 /* WhisperRuntime */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/WhisperRuntime;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		C1B2C3D4E5F6000000000002 /* WhisperRuntime */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = WhisperRuntime;
+		};
+/* End XCSwiftPackageProductDependency section */
+
 /* Begin XCBuildConfiguration section */
 		A1B2C3D4E5F6000000000061 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ONLY_ACTIVE_ARCH = YES;
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
 				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MACOSX_DEPLOYMENT_TARGET = 13.3;
 				SDKROOT = macosx;
 				SWIFT_VERSION = 5.0;
 			};
@@ -173,7 +196,7 @@
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
 				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MACOSX_DEPLOYMENT_TARGET = 13.3;
 				SDKROOT = macosx;
 				SWIFT_VERSION = 5.0;
 			};
@@ -199,7 +222,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MACOSX_DEPLOYMENT_TARGET = 13.3;
 				MARKETING_VERSION = 0.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.chenpx976.openmac.live;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -230,7 +253,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MACOSX_DEPLOYMENT_TARGET = 13.3;
 				MARKETING_VERSION = 0.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.chenpx976.openmac.live;
 				PRODUCT_NAME = "$(TARGET_NAME)";

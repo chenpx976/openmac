@@ -4,6 +4,7 @@ import CryptoKit
 
 struct LiveConfiguration: Codable {
     var barkURL = ""
+    var speechPrompt: String? = nil
 
     static let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("OpenMacLive", isDirectory: true)
@@ -19,6 +20,9 @@ struct LiveConfiguration: Codable {
     }
 
     func save() throws {
+        guard (speechPrompt?.count ?? 0) <= 1000 else {
+            throw APIRequestError.badRequest("识别术语请控制在 1000 字以内")
+        }
         if !barkURL.isEmpty {
             guard let url = URL(string: barkURL), ["https", "http"].contains(url.scheme), url.host != nil else {
                 throw APIRequestError.badRequest("Bark 地址应为包含设备 Key 的完整 HTTP(S) 地址")
@@ -103,6 +107,7 @@ struct LiveJob: Codable {
     let message: LiveMessage
     var result: String?
     var recognitionVersion: Int? = nil
+    var speechProfile: String? = nil
     var attempts = 0
     var retryAt = Date.distantPast
     var error: String?
@@ -117,6 +122,7 @@ struct LiveNotification: Codable {
     let body: String
     var sent = false
     var retryAt = Date.distantPast
+    var markdown: Bool? = nil
 }
 
 struct LiveState: Codable {
@@ -136,11 +142,11 @@ actor LivePipeline {
     private var lastError = ""
     private let file: URL
     private let send: (URLRequest) async throws -> (Data, URLResponse)
-    private let transcribe: (URL) async throws -> String
+    private let transcribe: ((URL) async throws -> String)?
 
     init(directory: URL = LiveConfiguration.directory, configuration: LiveConfiguration? = nil,
          send: @escaping (URLRequest) async throws -> (Data, URLResponse) = { try await URLSession.shared.data(for: $0) },
-         transcribe: @escaping (URL) async throws -> String = { try await SpeechTranscriber.transcribe(file: $0) }) {
+         transcribe: ((URL) async throws -> String)? = nil) {
         self.send = send
         self.transcribe = transcribe
         file = directory.appendingPathComponent("queue.json")
@@ -244,6 +250,11 @@ actor LivePipeline {
         lastError = ""
     }
 
+    private static func speechProfile(_ prompt: String) -> String {
+        let hash = SHA256.hash(data: Data(prompt.utf8)).map { String(format: "%02x", $0) }.joined()
+        return "speech-v5:\(SpeechTranscriber.engineName):\(hash)"
+    }
+
     func markdownExport(_ request: MarkdownExportRequest) throws -> MarkdownExportState {
         if let startupError { throw APIRequestError.internalError(startupError) }
         guard [request.appId, request.aliveId, request.roomId, request.title].allSatisfy({ !$0.isEmpty && $0.count <= 1000 }),
@@ -252,13 +263,14 @@ actor LivePipeline {
         }
         let room = "\(request.appId):\(request.aliveId):\(request.roomId)"
         let ids = Set(request.commentIds)
+        let profile = Self.speechProfile(config?.speechPrompt ?? "")
         let outdated = Set(state.jobs.filter {
             $0.room == room && ids.contains($0.message.comment_id) && $0.result != nil
-                && (($0.message.content_type == 3 && $0.recognitionVersion != 3)
+                && (($0.message.content_type == 3 && (($0.recognitionVersion ?? 0) < 5 || $0.speechProfile != profile))
                     || (($0.message.content_type == 2 || $0.message.more_info?["target_ppt"] != nil) && ($0.recognitionVersion ?? 0) < 2))
         }.map(\.key))
         if !outdated.isEmpty {
-            // 旧版语音可能只保留最后一句；旧 OCR 未指定中文语言，需要重新处理。
+            // 旧语音引擎的结果升级为长音频模型；旧 OCR 未指定中文语言，需要重新处理。
             try transaction { next in
                 for index in next.jobs.indices where outdated.contains(next.jobs[index].key) {
                     next.jobs[index].result = nil
@@ -313,14 +325,14 @@ actor LivePipeline {
         guard config?.barkURL.isEmpty == false else {
             throw APIRequestError.badRequest("请先在消息转发设置中配置 Bark 地址")
         }
-        let parts = Self.chunks(request.markdown)
+        let parts = Self.chunks(request.markdown, limit: 1000)
         let prefix = "markdown:\(request.id.uuidString):"
         if state.outbox.contains(where: { $0.id.hasPrefix(prefix) }) { return parts.count }
         try transaction { next in
             for (index, body) in parts.enumerated() {
                 let title = String(request.title.prefix(60)) + " · Markdown" +
                     (parts.count > 1 ? " (\(index + 1)/\(parts.count))" : "")
-                next.outbox.append(LiveNotification(id: prefix + String(index), title: title, body: body))
+                next.outbox.append(LiveNotification(id: prefix + String(index), title: title, body: body, markdown: true))
             }
         }
         return parts.count
@@ -330,7 +342,7 @@ actor LivePipeline {
         if let startupError { return startupError }
         let waiting = state.jobs.filter { $0.result == nil }.count
         let sending = state.outbox.filter { !$0.sent }.count
-        return "待识别 \(waiting) 条，待推送 \(sending) 条通知" +
+        return "语音：\(SpeechTranscriber.engineName)；待识别 \(waiting) 条，待推送 \(sending) 条通知" +
             (config?.barkURL.isEmpty != false ? "；尚未配置 Bark" : "") +
             (lastError.isEmpty ? "" : "；\(lastError)")
     }
@@ -340,12 +352,21 @@ actor LivePipeline {
         worker = Task {
             while !Task.isCancelled {
                 await processOnce()
-                do { try await Task.sleep(nanoseconds: 2_000_000_000) } catch { break }
+                // 有积压时只短暂让出执行权；空闲或等待重试时再低频轮询。
+                let ready = state.jobs.contains { $0.result == nil && $0.retryAt <= Date() }
+                do { try await Task.sleep(nanoseconds: ready ? 100_000_000 : 2_000_000_000) } catch { break }
             }
         }
     }
 
     func stop() { worker?.cancel(); worker = nil }
+
+    func shutdown() async {
+        let current = worker
+        worker = nil
+        current?.cancel()
+        await current?.value
+    }
 
     func processOnce() async {
         guard !processing, startupError == nil else { return }
@@ -357,12 +378,15 @@ actor LivePipeline {
                 .sorted { ($0.notify != false ? 0 : 1) < ($1.notify != false ? 0 : 1) }.prefix(50)
             for job in jobs {
                 try Task.checkCancellation()
+                let prompt = config?.speechPrompt ?? ""
+                let profile = Self.speechProfile(prompt)
                 do {
-                    let text = try await render(job.message, mediaFiles: job.mediaFiles ?? [:])
+                    let text = try await render(job.message, mediaFiles: job.mediaFiles ?? [:], speechPrompt: prompt)
                     try transaction { next in
                         guard let index = next.jobs.firstIndex(where: { $0.key == job.key }) else { return }
                         next.jobs[index].result = text
-                        next.jobs[index].recognitionVersion = 3
+                        next.jobs[index].recognitionVersion = 5
+                        next.jobs[index].speechProfile = profile
                         next.jobs[index].error = nil
                     }
                 } catch is CancellationError { throw CancellationError() }
@@ -371,7 +395,8 @@ actor LivePipeline {
                     lastError = detail
                     try transaction { next in
                         guard let index = next.jobs.firstIndex(where: { $0.key == job.key }) else { return }
-                        next.jobs[index].recognitionVersion = 3
+                        next.jobs[index].recognitionVersion = 5
+                        next.jobs[index].speechProfile = profile
                         next.jobs[index].attempts += 1
                         next.jobs[index].error = detail
                         next.jobs[index].retryAt = Date().addingTimeInterval(Double(next.jobs[index].attempts * 30))
@@ -390,7 +415,7 @@ actor LivePipeline {
         catch { lastError = error.localizedDescription }
     }
 
-    private func render(_ message: LiveMessage, mediaFiles: [String: String]) async throws -> String {
+    private func render(_ message: LiveMessage, mediaFiles: [String: String], speechPrompt: String) async throws -> String {
         var parts = [String]()
         switch message.content_type {
         case 0: parts.append(message.org_msg_content)
@@ -403,7 +428,8 @@ actor LivePipeline {
             guard let audio = message.more_info?["url"]?.string else {
                 throw APIRequestError.badRequest("语音消息缺少 URL")
             }
-            parts.append("【语音转写】\n" + (try await recognize(url: Self.mediaURL(audio), speech: true, mediaFiles: mediaFiles)))
+            let speech = try await recognize(url: Self.mediaURL(audio), speech: true, mediaFiles: mediaFiles, prompt: speechPrompt)
+            parts.append("【语音转写】\n\n" + SpeechTextLayout.paragraphs(speech))
             if let picture = message.more_info?["target_ppt"]?["pic_url"]?.string {
                 parts.append("【关联课件 OCR】\n" + (try await recognize(url: Self.mediaURL(picture), speech: false, mediaFiles: mediaFiles)))
             }
@@ -415,9 +441,9 @@ actor LivePipeline {
         return "[\(format.string(from: Date(timeIntervalSince1970: message.created_timestamp)))] \(name)\n" + parts.joined(separator: "\n\n")
     }
 
-    private func recognize(url: URL, speech: Bool, mediaFiles: [String: String]) async throws -> String {
+    private func recognize(url: URL, speech: Bool, mediaFiles: [String: String], prompt: String = "") async throws -> String {
         let stored = mediaFiles[url.absoluteString]
-        let key = "\(speech ? "speech-v3" : "ocr-zh-v2"):\(stored ?? url.absoluteString)"
+        let key = "\(speech ? Self.speechProfile(prompt) : "ocr-zh-v2"):\(stored ?? url.absoluteString)"
         if let cached = state.cache[key], !speech || !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return cached
         }
@@ -433,7 +459,8 @@ actor LivePipeline {
             let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mp3")
             try data.write(to: file)
             defer { try? FileManager.default.removeItem(at: file) }
-            text = try await transcribe(file).trimmingCharacters(in: .whitespacesAndNewlines)
+            if let transcribe { text = try await transcribe(file).trimmingCharacters(in: .whitespacesAndNewlines) }
+            else { text = try await SpeechTranscriber.transcribe(file: file, prompt: prompt).trimmingCharacters(in: .whitespacesAndNewlines) }
             guard !text.isEmpty else { throw APIRequestError.internalError("语音识别返回空文本，请重试识别") }
         } else {
             text = try OCRService().recognizeText(in: data).text
@@ -489,7 +516,16 @@ actor LivePipeline {
         for scalar in text.unicodeScalars {
             let part = String(scalar)
             if size + part.utf8.count > limit && !chunk.isEmpty {
-                result.append(chunk); chunk = ""; size = 0
+                // 优先在段落、换行或句末拆分，保留所有分隔符，拼接后仍是原始正文。
+                let boundary = chunk.range(of: "\n\n", options: .backwards)?.upperBound
+                    ?? chunk.lastIndex(where: { "\n。！？；!?".contains($0) }).map { chunk.index(after: $0) }
+                if let boundary, chunk[..<boundary].utf8.count >= limit / 3 {
+                    result.append(String(chunk[..<boundary]))
+                    chunk = String(chunk[boundary...])
+                    size = chunk.utf8.count
+                } else {
+                    result.append(chunk); chunk = ""; size = 0
+                }
             }
             chunk += part; size += part.utf8.count
         }
@@ -508,7 +544,7 @@ actor LivePipeline {
                 let messages = Array(roomJobs.prefix(while: { $0.result != nil }))
                 guard !messages.isEmpty else { continue }
                 let body = messages.compactMap(\.result).joined(separator: "\n\n——\n\n")
-                let parts = Self.chunks(body)
+                let parts = Self.chunks(body, limit: 1000)
                 for (index, part) in parts.enumerated() {
                     let title = String(messages[0].title.prefix(60)) + (parts.count > 1 ? " (\(index + 1)/\(parts.count))" : "")
                     next.outbox.append(LiveNotification(title: title, body: part))
@@ -529,9 +565,12 @@ actor LivePipeline {
                 request.httpMethod = "POST"
                 request.timeoutInterval = 20
                 request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                request.httpBody = try JSONSerialization.data(withJSONObject: [
+                var notificationPayload: [String: Any] = [
                     "title": notification.title, "body": notification.body, "group": "OpenMac 消息", "isArchive": 1
-                ])
+                ]
+                // 新版 Bark 渲染 Markdown，body 供旧版客户端回退；较小分段为两个字段预留载荷空间。
+                if notification.markdown == true { notificationPayload["markdown"] = notification.body }
+                request.httpBody = try JSONSerialization.data(withJSONObject: notificationPayload)
                 let (data, response) = try await send(request)
                 let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any]
                 guard (response as? HTTPURLResponse)?.statusCode == 200, payload?["code"] as? Int == 200 else {
