@@ -468,6 +468,12 @@ private struct OpenMacRequestRouter {
                 do { payload = try JSONDecoder().decode(MarkdownExportRequest.self, from: request.body) }
                 catch { throw APIRequestError.badRequest("导出 JSON 格式无效") }
                 data = APIResponseData(document: try await LivePipeline.shared.markdownExport(payload))
+            case "/api/live/export/notify":
+                guard request.method == .post else { throw APIRequestError.methodNotAllowed("Use POST") }
+                let payload: MarkdownNotificationRequest
+                do { payload = try JSONDecoder().decode(MarkdownNotificationRequest.self, from: request.body) }
+                catch { throw APIRequestError.badRequest("Markdown 推送 JSON 格式无效") }
+                data = APIResponseData(accepted: try await LivePipeline.shared.notifyMarkdown(payload))
             case "/api/live/retry":
                 guard request.method == .post else { throw APIRequestError.methodNotAllowed("Use POST") }
                 try await LivePipeline.shared.retryFailures()

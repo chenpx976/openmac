@@ -117,6 +117,35 @@ struct LiveChecks {
         try check(await requests.count == notificationsBeforeRepair, "修复旧缓存不能重发通知")
         try check(try await fixedSpeech.markdownExport(voiceRequest).completed == 1, "新版本缓存不应反复失效")
 
+        // 整份导出正文应无损拆分、落盘，重试和重启不能重复创建同一导出通知。
+        let exportDirectory = directory.appendingPathComponent("markdown-notifications")
+        let exportNotice = MarkdownNotificationRequest(id: UUID(), title: "导出记录", markdown: "# 记录\n\n" + longText)
+        let exportQueue = LivePipeline(directory: exportDirectory, configuration: config, send: { request in
+            (Data("{\"code\":500}".utf8), HTTPURLResponse(url: request.url!, statusCode: 500, httpVersion: nil, headerFields: nil)!)
+        })
+        let partCount = try await exportQueue.notifyMarkdown(exportNotice)
+        try check(partCount > 1, "长 Markdown 应拆分")
+        try check(try await exportQueue.notifyMarkdown(exportNotice) == partCount, "重复请求应返回原分段数")
+        await exportQueue.processOnce()
+        let exportFile = exportDirectory.appendingPathComponent("queue.json")
+        var exportState = try JSONDecoder().decode(LiveState.self, from: Data(contentsOf: exportFile))
+        try check(exportState.outbox.count == partCount && exportState.outbox.map(\.body).joined() == exportNotice.markdown,
+            "Markdown 正文必须与下载内容一致且不能重复入队")
+        try check(exportState.outbox.allSatisfy { !$0.sent }, "发送失败不能丢弃通知")
+        for index in exportState.outbox.indices { exportState.outbox[index].retryAt = .distantPast }
+        try JSONEncoder().encode(exportState).write(to: exportFile)
+        let resumedExport = LivePipeline(directory: exportDirectory, configuration: config, send: transport)
+        _ = try await resumedExport.notifyMarkdown(exportNotice)
+        let beforeExportSend = await requests.count
+        await resumedExport.processOnce()
+        try check(await requests.count == beforeExportSend + partCount, "重启后应继续发送全部 Markdown 分段")
+        _ = try await resumedExport.notifyMarkdown(exportNotice)
+        await resumedExport.processOnce()
+        try check(await requests.count == beforeExportSend + partCount, "已发送导出的重试不能再次推送")
+        let noBark = LivePipeline(directory: directory.appendingPathComponent("no-bark"), configuration: LiveConfiguration())
+        do { _ = try await noBark.notifyMarkdown(exportNotice); throw NSError(domain: "missing Bark accepted", code: 1) }
+        catch is APIRequestError { }
+
         // 原生 Vision 冒烟测试，无网络、无需隐私授权。
         let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 600, pixelsHigh: 120, bitsPerSample: 8,
             samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!

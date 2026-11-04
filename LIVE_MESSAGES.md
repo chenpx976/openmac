@@ -60,6 +60,8 @@ Bark 转发失败每 30 秒重试。成功回执表示 Bark 服务接受，不�
 
 实时转发任务优先于批量导出处理；已有识别结果和附件缓存共用。导出复用已完成结果；旧版中文 OCR 和只保留最后一句的语音缓存会先重新处理再输出。语音按音频时间合并分句结果，空的最终回调不覆盖前文；真正的空转写进入失败重试，不作为成功缓存。缓存升级保留已有推送标记，不重复发送通知。
 
+发送端下载 Markdown 后，可调用 `POST /api/live/export/notify`，提交 `{ "id": "导出操作的 UUID", "title": "消息记录", "markdown": "完整正文" }`。服务按 UTF-8 字节数拆分正文并持久入队，返回 `data.accepted` 分段数；需已配置 Bark，正文最大 10MB。同一次导出重试沿用 UUID，不重复入队；再次主动导出使用新的 UUID。推送失败会自动重试，成功入队不等于手机已展示。
+
 ## 本机 HTTP 接口
 
 服务只监听 `127.0.0.1`，无需 Authorization 请求头。
@@ -69,6 +71,7 @@ Bark 转发失败每 30 秒重试。成功回执表示 Bark 服务接受，不�
 | `POST /api/live/messages` | 接收消息和附件，持久化成功后返回确认 |
 | `GET /api/live/status` | 查看消息处理与转发状态 |
 | `POST /api/live/export` | 查询指定消息的处理进度，完成后返回 Markdown |
+| `POST /api/live/export/notify` | 将完整 Markdown 正文加入 Bark 推送队列 |
 | `POST /api/live/retry` | 将识别失败的消息重新入队 |
 
 消息接口使用 `multipart/form-data`：

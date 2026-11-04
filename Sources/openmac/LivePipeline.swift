@@ -303,6 +303,29 @@ actor LivePipeline {
         return MarkdownExportState(total: ids.count, completed: completed, failed: failed, missing: missing, markdown: markdown)
     }
 
+    /// 使用导出操作 ID 去重；持久化后交由原有 Bark 队列发送及重试。
+    func notifyMarkdown(_ request: MarkdownNotificationRequest) throws -> Int {
+        guard !request.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              request.title.count <= 1000, !request.markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              request.markdown.utf8.count <= 10 * 1024 * 1024 else {
+            throw APIRequestError.badRequest("Markdown 标题或正文无效，正文最大 10MB")
+        }
+        guard config?.barkURL.isEmpty == false else {
+            throw APIRequestError.badRequest("请先在消息转发设置中配置 Bark 地址")
+        }
+        let parts = Self.chunks(request.markdown)
+        let prefix = "markdown:\(request.id.uuidString):"
+        if state.outbox.contains(where: { $0.id.hasPrefix(prefix) }) { return parts.count }
+        try transaction { next in
+            for (index, body) in parts.enumerated() {
+                let title = String(request.title.prefix(60)) + " · Markdown" +
+                    (parts.count > 1 ? " (\(index + 1)/\(parts.count))" : "")
+                next.outbox.append(LiveNotification(id: prefix + String(index), title: title, body: body))
+            }
+        }
+        return parts.count
+    }
+
     func statusText() -> String {
         if let startupError { return startupError }
         let waiting = state.jobs.filter { $0.result == nil }.count

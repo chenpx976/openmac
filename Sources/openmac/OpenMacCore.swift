@@ -254,6 +254,12 @@ struct MarkdownExportRequest: Codable {
     let commentIds: [String]
 }
 
+struct MarkdownNotificationRequest: Codable {
+    let id: UUID
+    let title: String
+    let markdown: String
+}
+
 struct MarkdownExportState: Encodable, Equatable {
     let total: Int
     let completed: Int
@@ -414,6 +420,11 @@ struct APIEndpoint: Identifiable, Equatable {
                     requestDemo: "{\"appId\":\"app_example\",\"aliveId\":\"l_example\",\"roomId\":\"room_example\",\"title\":\"消息记录\",\"commentIds\":[]}",
                     postParameters: "指定消息来源和 commentIds。消息入队时设置 notify:false 可只处理、不推送。",
                     responseFormat: "data.document 包含 total、completed、failed、missing；全部完成时包含 markdown。"),
+        APIEndpoint(name: "推送 Markdown", method: "POST", path: "/api/live/export/notify",
+                    summary: "将完整 Markdown 正文加入 Bark 持久队列，长正文分条发送。",
+                    requestDemo: "{\"id\":\"00000000-0000-4000-8000-000000000001\",\"title\":\"消息记录\",\"markdown\":\"# 消息记录\"}",
+                    postParameters: "id 是每次导出操作的 UUID，重试使用相同 ID；title 为标题，markdown 为实际下载正文，最大 10MB。需已配置 Bark。",
+                    responseFormat: "data.accepted 为通知分段数；成功表示已持久入队，不代表手机已展示。"),
         APIEndpoint(name: "接收消息", method: "POST", path: "/api/live/messages",
                     summary: "接收并保存消息，支持语音转写、图片 OCR 和转发 Bark。",
                     requestDemo: "{\"appId\":\"app_example\",\"aliveId\":\"l_example\",\"roomId\":\"XET#example\",\"title\":\"消息\",\"messages\":[]}",
