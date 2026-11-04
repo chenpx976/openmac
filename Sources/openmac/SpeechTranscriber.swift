@@ -115,22 +115,38 @@ enum SpeechTextLayout {
         var paragraph = ""
         func flush() {
             let value = paragraph.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !value.isEmpty { paragraphs.append(value) }
+            if !value.isEmpty {
+                if value.count < 24, let previous = paragraphs.last,
+                   let last = previous.last, "，,、".contains(last), previous.count + value.count <= 180 {
+                    paragraphs[paragraphs.count - 1] += value
+                } else { paragraphs.append(value) }
+            }
             paragraph = ""
         }
-        for character in cleaned {
+        let characters = Array(cleaned)
+        for (index, character) in characters.enumerated() {
             if character == "\n" { flush(); continue }
             paragraph.append(character)
             if ("。！？；!?".contains(character) && paragraph.count >= 45)
                 || ("，、, ".contains(character) && paragraph.count >= 100) { flush() }
+            // 无标点时兜底分段；不在英文词、金额或小数内部插入换行。
+            if paragraph.count >= 150, index + 1 < characters.count,
+               isHan(character), isHan(characters[index + 1]) { flush() }
         }
         flush()
         return paragraphs.joined(separator: "\n\n")
+    }
+
+    private static func isHan(_ character: Character) -> Bool {
+        guard !"零〇一二三四五六七八九十百千万亿点".contains(character),
+              let scalar = character.unicodeScalars.first else { return false }
+        return (0x3400...0x9FFF).contains(scalar.value)
     }
 }
 
 enum SpeechTranscriber {
     static let whisperModel = LiveConfiguration.directory.appendingPathComponent("models/ggml-large-v3-turbo-q5_0.bin")
+    static let vadModel = LiveConfiguration.directory.appendingPathComponent("models/ggml-silero-v6.2.0.bin")
     static var usesWhisper: Bool {
         #if canImport(WhisperRuntime)
         return FileManager.default.fileExists(atPath: whisperModel.path)
@@ -214,7 +230,10 @@ enum SpeechTranscriber {
         #if canImport(WhisperRuntime)
         if usesWhisper {
             let hint = prompt.isEmpty ? "简体中文，带标点的语音记录。" : prompt
-            return try await WhisperEngine.shared.transcribe(file: file, model: whisperModel, prompt: hint)
+            guard FileManager.default.fileExists(atPath: vadModel.path) else {
+                throw APIRequestError.internalError("缺少语音检测模型，请运行 scripts/install-whisper-model.sh")
+            }
+            return try await WhisperEngine.shared.transcribe(file: file, model: whisperModel, prompt: hint, vadModel: vadModel).text
         }
         #endif
         if #available(macOS 26.0, *), Speech.SpeechTranscriber.isAvailable {

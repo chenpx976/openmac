@@ -11,7 +11,7 @@ bash scripts/install-whisper-model.sh  # 首次下载并校验约 574MB 的 Turb
 bash scripts/install-live.sh
 ```
 
-应用安装到 `~/Applications/OpenMac Live.app`。
+应用安装到 `~/Applications/OpenMac Live.app`。升级旧版本时也请运行模型安装脚本：已存在的 Turbo 模型会复用，只补充约 885KB 的 Silero 语音检测模型，两份文件均校验 SHA-256。
 
 1. 启动 OpenMac，设置 HTTP 端口（默认 **8080**），打开服务开关。
 2. 在“消息转发”页填写 Bark 完整地址，例如 `https://api.day.app/设备Key/`，点击“保存设置”。
@@ -32,13 +32,13 @@ bash scripts/install-live.sh
 
 - **文字**：保留内容并整理发送者、时间等信息。
 - **图片**：使用 Vision 识别简体中文、繁体中文和英文。
-- **音频**：默认使用 `large-v3-turbo Q5_0`，模型常驻复用，音频由 AVFoundation 转成 16kHz 单声道。术语仅作为识别提示，不做强制文字替换。未安装模型时，macOS 26 使用 SpeechAnalyzer；旧系统使用分段 Speech。
+- **音频**：默认使用 `large-v3-turbo Q5_0`，模型常驻复用，音频由 AVFoundation 转成 16kHz 单声道。Silero VAD 过滤非语音区间，并保留边缘余量，减少静音尾部产生无关文字。手工术语和同房间最近原始文字中的短词组仅作为识别提示，不做强制文字替换，不从 OCR 或旧转写反推名称。未安装模型时，macOS 26 使用 SpeechAnalyzer；旧系统使用分段 Speech。
 - **关联图片**：音频所附图片也可识别，与转写结果一起整理。
 - **Bark 转发**：语音正文按句子和短段落排版，段落之间留空行。每条正文约 1000 UTF-8 字节，优先在段落或句末分条，使用“OpenMac 消息”分组。Markdown 导出同时提供 Bark 的 `markdown` 字段和兼容旧版的 `body` 字段，两个字段正文完全一致。
 
-没有填写 Bark 地址时，消息仍会保存和处理，通知留在本地等待。识别结果按文件内容、引擎和术语提示缓存，重复附件无需再次识别。有积压任务时连续处理，不在每条之后固定等待两秒。
+没有填写 Bark 地址时，消息仍会保存和处理，通知留在本地等待。识别结果按文件内容、引擎、手工术语和房间词语提示缓存，重复附件无需再次识别。有积压任务时连续处理，不在每条之后固定等待两秒。
 
-识别失败会重试三次，之后保留原始消息并发送错误说明。修复权限或其他问题后，可点击“重新识别失败消息”。语音识别可能出现同音词错误，不会自动改写原意。
+识别失败会重试三次，之后保留原始消息并发送错误说明。修复权限或其他问题后，可点击“重新识别失败消息”。语音按识别时间边界、停顿和标点分段，无标点长段落也有长度兜底，并保留重复口语及数字。低置信片段显示“识别存疑”及原音频时间范围，正文仍保留。置信信号不能检出所有错词，语音识别仍可能出现同音词错误，不会自动改写原意。
 
 Bark 转发失败每 30 秒重试。成功回执表示 Bark 服务接受，不能证明手机已经展示通知。如果服务接受后、写入本机确认前应用退出，重试可能重复通知。
 
@@ -101,6 +101,8 @@ Bark 转发失败每 30 秒重试。成功回执表示 Bark 服务接受，不�
 ```sh
 bash scripts/test-live.sh
 swift test --package-path Packages/WhisperRuntime
+# 可选：使用已安装模型验证纯静音不会生成文字
+WHISPER_TEST_MODEL="$HOME/Library/Application Support/OpenMacLive/models/ggml-large-v3-turbo-q5_0.bin" swift test --package-path Packages/WhisperRuntime
 xcodebuild -project openmac.xcodeproj -scheme openmac -configuration Debug CODE_SIGNING_ALLOWED=NO build
 ```
 

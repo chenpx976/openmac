@@ -19,7 +19,7 @@ struct LiveSettingsView: View {
                 .textFieldStyle(.roundedBorder)
             TextField("识别术语（可选，用顿号分隔名称和专业词）", text: $speechPrompt, axis: .vertical)
                 .textFieldStyle(.roundedBorder).lineLimit(2...4)
-            Text("术语用于引导识别，不会直接替换原文。修改后重新导出会重新识别语音。")
+            Text("也会参考同房间的原始文字辅助识别名称，不直接替换正文。修改术语后重新导出会重新识别语音。")
                 .font(.caption).foregroundStyle(.secondary)
             HStack {
                 Button("保存设置") {

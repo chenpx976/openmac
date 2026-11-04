@@ -38,6 +38,13 @@ struct LiveChecks {
         try check(readable.replacingOccurrences(of: "\n", with: "") == spoken, "排版不能改写正文")
         try check(SpeechTextLayout.paragraphs("你好 ， 世界 。") == "你好，世界。", "标点空格整理失败")
 
+        let shortEnding = String(repeating: "前面的说明", count: 20) + ",最后还有几个字。"
+        try check(SpeechTextLayout.paragraphs(shortEnding) == shortEnding, "逗号后的短尾句不应单独成段")
+        let withoutPunctuation = String(repeating: "这是一段没有标点的口述", count: 15) + "金额12345.67美元仓位两点五成" + String(repeating: "继续保留全部原话", count: 30)
+        let fallbackLayout = SpeechTextLayout.paragraphs(withoutPunctuation)
+        try check(fallbackLayout.contains("\n\n") && fallbackLayout.contains("12345.67") && fallbackLayout.contains("两点五成"), "无标点文本应分段且不拆开数字")
+        try check(fallbackLayout.replacingOccurrences(of: "\n", with: "") == withoutPunctuation, "兜底排版不能丢字或去重")
+
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         var config = LiveConfiguration()
@@ -112,7 +119,7 @@ struct LiveChecks {
         try check(legacy.jobs[0].result == nil && legacy.jobs[0].error != nil && legacy.cache.isEmpty,
             "空转写不能标记为成功或写入缓存")
         legacy.jobs[0].result = "[时间] 发送者\n【语音转写】\n"
-        legacy.jobs[0].recognitionVersion = 2
+        legacy.jobs[0].recognitionVersion = 5
         legacy.jobs[0].error = nil
         legacy.jobs[0].notify = true
         legacy.jobs[0].notified = true
@@ -126,6 +133,24 @@ struct LiveChecks {
         try check(repaired.failed == 0 && repaired.markdown?.contains("完整前句\n\n后句") == true, "重识别结果未进入导出")
         try check(await requests.count == notificationsBeforeRepair, "修复旧缓存不能重发通知")
         try check(try await fixedSpeech.markdownExport(voiceRequest).completed == 1, "新版本缓存不应反复失效")
+
+        // 房间文字更新术语后需要重识别；其他房间的文字不能污染提示或使缓存失效。
+        let termsMessage = LiveMessage(comment_id: "terms", content_type: 0, user_type: 1,
+            org_msg_content: "20%星河，30%辰光", more_info: nil, created_timestamp: 1700000001, wx_nickname: nil, comment_name: nil)
+        let termPrompt = SpeechVocabulary.prompt(manual: "简体中文。", messages: [termsMessage, voice])
+        try check(termPrompt.contains("星河") && termPrompt.contains("辰光") && !termPrompt.contains("20") && !termPrompt.contains("30"), "术语应来自原文且不包含数字")
+        try check(termPrompt == SpeechVocabulary.prompt(manual: "简体中文。", messages: [voice, termsMessage]), "相同原文的提示应稳定")
+        var otherRoom = LiveBatch(appId: "app", aliveId: "source", roomId: "other-room", title: "其他房间", messages: [termsMessage])
+        otherRoom.notify = false
+        _ = try await fixedSpeech.ingest(otherRoom)
+        try check(try await fixedSpeech.markdownExport(voiceRequest).completed == 1, "其他房间不应影响缓存")
+        var sameRoom = LiveBatch(appId: "app", aliveId: "source", roomId: "room", title: "语音记录", messages: [termsMessage])
+        sameRoom.notify = false
+        _ = try await fixedSpeech.ingest(sameRoom)
+        try check(try await fixedSpeech.markdownExport(voiceRequest).completed == 0, "同房间新术语应使语音缓存失效")
+        await fixedSpeech.processOnce()
+        try check(try await fixedSpeech.markdownExport(voiceRequest).completed == 1, "术语升级后应完成重识别")
+        try check(await requests.count == notificationsBeforeRepair, "术语升级不能重复发送历史通知")
 
         // 整份导出正文应无损拆分、落盘，重试和重启不能重复创建同一导出通知。
         let exportDirectory = directory.appendingPathComponent("markdown-notifications")

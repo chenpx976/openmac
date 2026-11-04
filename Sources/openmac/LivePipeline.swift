@@ -76,6 +76,34 @@ struct LiveMessage: Codable {
     let comment_name: String?
 }
 
+enum SpeechVocabulary {
+    /// 只取原始文字里的短词组，不从转写/OCR 反推名称，也不把仓位数字喂给模型。
+    static func prompt(manual: String, messages: [LiveMessage]) -> String {
+        let pattern = try! NSRegularExpression(pattern: #"(?<![\p{Han}A-Za-z])[\p{Han}A-Za-z]{2,8}(?![\p{Han}A-Za-z])"#)
+        let sources = messages.filter { $0.content_type == 0 && $0.user_type == 1 }
+            .sorted {
+                if $0.created_timestamp != $1.created_timestamp { return $0.created_timestamp > $1.created_timestamp }
+                return $0.comment_id < $1.comment_id
+            }.prefix(20)
+        var words = [String]()
+        var seen = Set<String>()
+        for message in sources {
+            let text = String(message.org_msg_content.prefix(500))
+                .replacingOccurrences(of: "<[^>]*>", with: " ", options: .regularExpression)
+            for match in pattern.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+                if let range = Range(match.range, in: text) {
+                    let word = String(text[range])
+                    if seen.insert(word).inserted { words.append(word) }
+                }
+            }
+        }
+        let terms = words.prefix(24).sorted().joined(separator: "、")
+        guard !terms.isEmpty else { return manual }
+        // 将房间词语放在提示末尾，避免长手工提示挤掉当前房间的名称。
+        return manual + "\n原始文字中的词语：\(terms)。"
+    }
+}
+
 struct LiveMediaReference: Codable {
     let url: String
     let field: String
@@ -250,9 +278,15 @@ actor LivePipeline {
         lastError = ""
     }
 
+    private static let speechVersion = 6
+
+    private func speechPrompt(room: String) -> String {
+        SpeechVocabulary.prompt(manual: config?.speechPrompt ?? "", messages: state.jobs.filter { $0.room == room }.map(\.message))
+    }
+
     private static func speechProfile(_ prompt: String) -> String {
         let hash = SHA256.hash(data: Data(prompt.utf8)).map { String(format: "%02x", $0) }.joined()
-        return "speech-v5:\(SpeechTranscriber.engineName):\(hash)"
+        return "speech-v\(speechVersion):\(SpeechTranscriber.engineName):\(hash)"
     }
 
     func markdownExport(_ request: MarkdownExportRequest) throws -> MarkdownExportState {
@@ -263,10 +297,10 @@ actor LivePipeline {
         }
         let room = "\(request.appId):\(request.aliveId):\(request.roomId)"
         let ids = Set(request.commentIds)
-        let profile = Self.speechProfile(config?.speechPrompt ?? "")
+        let profile = Self.speechProfile(speechPrompt(room: room))
         let outdated = Set(state.jobs.filter {
             $0.room == room && ids.contains($0.message.comment_id) && $0.result != nil
-                && (($0.message.content_type == 3 && (($0.recognitionVersion ?? 0) < 5 || $0.speechProfile != profile))
+                && (($0.message.content_type == 3 && (($0.recognitionVersion ?? 0) < Self.speechVersion || $0.speechProfile != profile))
                     || (($0.message.content_type == 2 || $0.message.more_info?["target_ppt"] != nil) && ($0.recognitionVersion ?? 0) < 2))
         }.map(\.key))
         if !outdated.isEmpty {
@@ -378,14 +412,14 @@ actor LivePipeline {
                 .sorted { ($0.notify != false ? 0 : 1) < ($1.notify != false ? 0 : 1) }.prefix(50)
             for job in jobs {
                 try Task.checkCancellation()
-                let prompt = config?.speechPrompt ?? ""
+                let prompt = speechPrompt(room: job.room)
                 let profile = Self.speechProfile(prompt)
                 do {
                     let text = try await render(job.message, mediaFiles: job.mediaFiles ?? [:], speechPrompt: prompt)
                     try transaction { next in
                         guard let index = next.jobs.firstIndex(where: { $0.key == job.key }) else { return }
                         next.jobs[index].result = text
-                        next.jobs[index].recognitionVersion = 5
+                        next.jobs[index].recognitionVersion = Self.speechVersion
                         next.jobs[index].speechProfile = profile
                         next.jobs[index].error = nil
                     }
@@ -395,7 +429,7 @@ actor LivePipeline {
                     lastError = detail
                     try transaction { next in
                         guard let index = next.jobs.firstIndex(where: { $0.key == job.key }) else { return }
-                        next.jobs[index].recognitionVersion = 5
+                        next.jobs[index].recognitionVersion = Self.speechVersion
                         next.jobs[index].speechProfile = profile
                         next.jobs[index].attempts += 1
                         next.jobs[index].error = detail
