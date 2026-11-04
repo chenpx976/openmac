@@ -3,6 +3,42 @@ import Foundation
 import AVFoundation
 import Speech
 
+/// 本地识别可能在停顿后另起一句，最终回调甚至是空串；按音频时间保留已定稿的句子。
+struct SpeechTranscript {
+    struct Phrase {
+        let start: Double
+        let end: Double
+        let text: String
+    }
+    private var phrases = [Phrase]()
+    private var draft = ""
+
+    mutating func accept(_ text: String, start: Double? = nil, end: Double? = nil) {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        guard let start, let end, end > start else {
+            draft = text
+            return
+        }
+        // 累积结果或同一句的修订覆盖相同时间段，不能把每次 partial 都拼接一遍。
+        phrases.removeAll { $0.start < end && $0.end > start }
+        phrases.append(Phrase(start: start, end: end, text: text))
+        phrases.sort { $0.start < $1.start }
+        draft = ""
+    }
+
+    func finish() throws -> String {
+        var texts = phrases.map(\.text)
+        if !draft.isEmpty && draft != texts.last {
+            let accumulated = texts.joined()
+            if !accumulated.isEmpty && draft.hasPrefix(accumulated) { texts = [draft] }
+            else { texts.append(draft) }
+        }
+        guard !texts.isEmpty else { throw APIRequestError.internalError("语音识别返回空文本，请重试识别") }
+        return texts.joined(separator: "\n")
+    }
+}
+
 /// 一次识别对应一个对象，保证结果、错误与超时只恢复一次 continuation。
 @MainActor
 private final class SpeechOperation {
@@ -10,6 +46,7 @@ private final class SpeechOperation {
     private var task: SFSpeechRecognitionTask?
     private var timeout: Task<Void, Never>?
     private var recognizer: SFSpeechRecognizer?
+    private var transcript = SpeechTranscript()
 
     func run(file: URL) async throws -> String {
         guard SFSpeechRecognizer.authorizationStatus() == .authorized else {
@@ -22,14 +59,22 @@ private final class SpeechOperation {
         self.recognizer = recognizer
         let request = SFSpeechURLRecognitionRequest(url: file)
         request.requiresOnDeviceRecognition = true
-        request.shouldReportPartialResults = false
+        request.shouldReportPartialResults = true
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 self.continuation = continuation
                 task = recognizer.recognitionTask(with: request) { result, error in
                     Task { @MainActor in
+                        guard self.continuation != nil else { return }
+                        if let result {
+                            let segments = result.bestTranscription.segments.filter { $0.duration > 0 }
+                            self.transcript.accept(result.bestTranscription.formattedString,
+                                start: segments.first?.timestamp,
+                                end: segments.last.map { $0.timestamp + $0.duration })
+                        }
                         if let result, result.isFinal {
-                            self.finish(.success(result.bestTranscription.formattedString))
+                            do { self.finish(.success(try self.transcript.finish())) }
+                            catch { self.finish(.failure(error)) }
                         } else if let error {
                             self.finish(.failure(error))
                         }

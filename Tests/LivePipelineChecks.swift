@@ -14,6 +14,24 @@ actor Requests {
 @main
 struct LiveChecks {
     static func main() async throws {
+        var transcript = SpeechTranscript()
+        transcript.accept("第一")
+        transcript.accept("第一句话")
+        transcript.accept("第一句话", start: 0.7, end: 3.2)
+        transcript.accept("")
+        try check(try transcript.finish() == "第一句话", "空最终回调不能清空已识别句子")
+        transcript.accept("第二")
+        transcript.accept("第二句话", start: 5.1, end: 8.6)
+        try check(try transcript.finish() == "第一句话\n第二句话", "停顿后的句子不应覆盖前文")
+        transcript.accept("第一句修订", start: 0.7, end: 3.3)
+        try check(try transcript.finish() == "第一句修订\n第二句话", "同一句修订必须覆盖，不能重复拼接")
+        transcript.accept("第一句修订第二句话", start: 0.7, end: 8.6)
+        try check(try transcript.finish() == "第一句修订第二句话", "累积回调不能重复前文")
+        var emptyTranscript = SpeechTranscript()
+        emptyTranscript.accept(" \n")
+        do { _ = try emptyTranscript.finish(); throw NSError(domain: "empty speech accepted", code: 1) }
+        catch is APIRequestError { }
+
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         var config = LiveConfiguration()
@@ -67,6 +85,37 @@ struct LiveChecks {
         multipart.append(Data("\r\n--test-boundary--\r\n".utf8))
         let fields = try LiveMultipart(body: multipart, contentType: "multipart/form-data; boundary=test-boundary").fields
         try check(fields["media0"] == binary && fields["metadata"] == Data("{}".utf8), "multipart 二进制被损坏")
+
+        // 空转写必须进入失败重试，旧版空白/截断缓存必须重识别，且不重发通知。
+        let voiceDirectory = directory.appendingPathComponent("speech-test")
+        let voice = LiveMessage(comment_id: "voice-test", content_type: 3, user_type: 1, org_msg_content: "",
+            more_info: .object(["url": .string("https://media.myqcloud.com/test.mp3")]),
+            created_timestamp: 1700000000, wx_nickname: "发送者", comment_name: nil)
+        var voiceBatch = LiveBatch(appId: "app", aliveId: "source", roomId: "room", title: "语音记录", messages: [voice])
+        voiceBatch.notify = false
+        voiceBatch.media = [LiveMediaReference(url: "https://media.myqcloud.com/test.mp3", field: "audio")]
+        let emptySpeech = LivePipeline(directory: voiceDirectory, configuration: config, send: transport, transcribe: { _ in " \n" })
+        _ = try await emptySpeech.ingest(voiceBatch, files: ["audio": Data([1, 2, 3])])
+        await emptySpeech.processOnce()
+        let voiceFile = voiceDirectory.appendingPathComponent("queue.json")
+        var legacy = try JSONDecoder().decode(LiveState.self, from: Data(contentsOf: voiceFile))
+        try check(legacy.jobs[0].result == nil && legacy.jobs[0].error != nil && legacy.cache.isEmpty,
+            "空转写不能标记为成功或写入缓存")
+        legacy.jobs[0].result = "[时间] 发送者\n【语音转写】\n"
+        legacy.jobs[0].recognitionVersion = 2
+        legacy.jobs[0].error = nil
+        legacy.jobs[0].notify = true
+        legacy.jobs[0].notified = true
+        try JSONEncoder().encode(legacy).write(to: voiceFile)
+        let fixedSpeech = LivePipeline(directory: voiceDirectory, configuration: config, send: transport, transcribe: { _ in "完整前句\n后句" })
+        let voiceRequest = MarkdownExportRequest(appId: "app", aliveId: "source", roomId: "room", title: "语音记录", commentIds: ["voice-test"])
+        let notificationsBeforeRepair = await requests.count
+        try check(try await fixedSpeech.markdownExport(voiceRequest).completed == 0, "旧语音缓存应失效")
+        await fixedSpeech.processOnce()
+        let repaired = try await fixedSpeech.markdownExport(voiceRequest)
+        try check(repaired.failed == 0 && repaired.markdown?.contains("完整前句\n后句") == true, "重识别结果未进入导出")
+        try check(await requests.count == notificationsBeforeRepair, "修复旧缓存不能重发通知")
+        try check(try await fixedSpeech.markdownExport(voiceRequest).completed == 1, "新版本缓存不应反复失效")
 
         // 原生 Vision 冒烟测试，无网络、无需隐私授权。
         let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 600, pixelsHigh: 120, bitsPerSample: 8,

@@ -136,10 +136,13 @@ actor LivePipeline {
     private var lastError = ""
     private let file: URL
     private let send: (URLRequest) async throws -> (Data, URLResponse)
+    private let transcribe: (URL) async throws -> String
 
     init(directory: URL = LiveConfiguration.directory, configuration: LiveConfiguration? = nil,
-         send: @escaping (URLRequest) async throws -> (Data, URLResponse) = { try await URLSession.shared.data(for: $0) }) {
+         send: @escaping (URLRequest) async throws -> (Data, URLResponse) = { try await URLSession.shared.data(for: $0) },
+         transcribe: @escaping (URL) async throws -> String = { try await SpeechTranscriber.transcribe(file: $0) }) {
         self.send = send
+        self.transcribe = transcribe
         file = directory.appendingPathComponent("queue.json")
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
@@ -250,15 +253,16 @@ actor LivePipeline {
         let room = "\(request.appId):\(request.aliveId):\(request.roomId)"
         let ids = Set(request.commentIds)
         let outdated = Set(state.jobs.filter {
-            $0.room == room && ids.contains($0.message.comment_id) && $0.result != nil && $0.error == nil
-                && $0.recognitionVersion != 2
-                && ($0.message.content_type == 2 || $0.message.more_info?["target_ppt"] != nil)
+            $0.room == room && ids.contains($0.message.comment_id) && $0.result != nil
+                && (($0.message.content_type == 3 && $0.recognitionVersion != 3)
+                    || (($0.message.content_type == 2 || $0.message.more_info?["target_ppt"] != nil) && ($0.recognitionVersion ?? 0) < 2))
         }.map(\.key))
         if !outdated.isEmpty {
-            // 旧版未指定中文语言的 OCR 结果不能作为新导出的缓存。
+            // 旧版语音可能只保留最后一句；旧 OCR 未指定中文语言，需要重新处理。
             try transaction { next in
                 for index in next.jobs.indices where outdated.contains(next.jobs[index].key) {
                     next.jobs[index].result = nil
+                    next.jobs[index].error = nil
                     next.jobs[index].attempts = 0
                     next.jobs[index].retryAt = .distantPast
                 }
@@ -335,7 +339,7 @@ actor LivePipeline {
                     try transaction { next in
                         guard let index = next.jobs.firstIndex(where: { $0.key == job.key }) else { return }
                         next.jobs[index].result = text
-                        next.jobs[index].recognitionVersion = 2
+                        next.jobs[index].recognitionVersion = 3
                         next.jobs[index].error = nil
                     }
                 } catch is CancellationError { throw CancellationError() }
@@ -344,6 +348,7 @@ actor LivePipeline {
                     lastError = detail
                     try transaction { next in
                         guard let index = next.jobs.firstIndex(where: { $0.key == job.key }) else { return }
+                        next.jobs[index].recognitionVersion = 3
                         next.jobs[index].attempts += 1
                         next.jobs[index].error = detail
                         next.jobs[index].retryAt = Date().addingTimeInterval(Double(next.jobs[index].attempts * 30))
@@ -389,8 +394,10 @@ actor LivePipeline {
 
     private func recognize(url: URL, speech: Bool, mediaFiles: [String: String]) async throws -> String {
         let stored = mediaFiles[url.absoluteString]
-        let key = "\(speech ? "speech" : "ocr-zh-v2"):\(stored ?? url.absoluteString)"
-        if let cached = state.cache[key] { return cached }
+        let key = "\(speech ? "speech-v3" : "ocr-zh-v2"):\(stored ?? url.absoluteString)"
+        if let cached = state.cache[key], !speech || !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return cached
+        }
         let data: Data
         if let stored {
             let localFile = file.deletingLastPathComponent().appendingPathComponent("media").appendingPathComponent(stored)
@@ -403,7 +410,8 @@ actor LivePipeline {
             let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mp3")
             try data.write(to: file)
             defer { try? FileManager.default.removeItem(at: file) }
-            text = try await SpeechTranscriber.transcribe(file: file)
+            text = try await transcribe(file).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { throw APIRequestError.internalError("语音识别返回空文本，请重试识别") }
         } else {
             text = try OCRService().recognizeText(in: data).text
         }
